@@ -140,6 +140,11 @@ extension/
   common.js/css        shared helpers & styles
 ```
 
+### Keeping the private ClaudeCode copy up to date
+This project is also mirrored into the `applyflow-ai/` folder of a private repo. After committing
+and pushing, run `.\sync-claudecode.ps1` from the project root. It uses the git remote named
+`claudecode`.
+
 ### Quick check scripts (`backend/test-*.js`)
 These standalone scripts came from the first day of the project, before the app was built. They
 were used to check that the API keys worked and to compare AI providers. They aren't part of the
@@ -149,7 +154,7 @@ app and aren't needed to run it.
 |---|---|
 | `test-gemini.js` | Sends one "Hello" prompt to Gemini to confirm `GEMINI_API_KEY` works. |
 | `test-job-analysis.js` | Runs a sample LinkedIn post through job analysis. |
-| `test-openai.js` | Sends one "Hello" prompt to OpenAI. An early experiment: ApplyFlow was built on **Gemini** instead, and the app never calls OpenAI. Kept only for reference, and needs `OPENAI_API_KEY` if you run it. |
+| `test-openai.js` | Sends one "Hello" prompt to OpenAI. An early experiment. OpenAI required buying credits before the first request would work, so ApplyFlow was built on **Gemini**, whose API has a free tier. The app never calls OpenAI. Kept only for reference, and needs `OPENAI_API_KEY` if you run it. |
 
 Run one with `node test-gemini.js` from the `backend` folder. The real automated tests are in
 `tests/` (`npm.cmd test`).

@@ -121,8 +121,9 @@ extension can be read by anyone who installs it. Keeping keys in `backend/.env` 
 machine means they're never exposed.
 
 **Choosing the AI provider.** On day one we wrote two quick check scripts:
-`backend/test-gemini.js` and `backend/test-openai.js`. The product was then built entirely on
-**Google Gemini**, and OpenAI is not used anywhere in the app. `test-openai.js` stays in the repo
+`backend/test-gemini.js` and `backend/test-openai.js`. We chose **Google Gemini** because its API has a genuinely free tier, which suits a personal project.
+OpenAI asked for paid credits before the very first request would work. The product was built
+entirely on Gemini, and OpenAI is not used anywhere in the app. `test-openai.js` stays in the repo
 only as a record of that early experiment.
 
 ### 7.2 Making AI fast and reliable

@@ -1,6 +1,7 @@
 
 // Early experiment (day one of the project): a quick check that an OpenAI key works.
-// ApplyFlow AI was built on Google Gemini instead and never calls OpenAI. This script
+// OpenAI required paid credits up front, so ApplyFlow AI was built on Google Gemini
+// (free tier) instead and never calls OpenAI. This script
 // is kept only for reference. Run: node test-openai.js (needs OPENAI_API_KEY in .env)
 import OpenAI from "openai";
 import dotenv from "dotenv";
