@@ -42,10 +42,10 @@ test("MIME message has both plain-text and HTML versions", () => {
 
 test("textToHtml makes paragraphs, line breaks and links — and escapes HTML", () => {
   const html = textToHtml(
-    "Dear Team,\n\nI build <script>alert(1)</script> things & more.\n\nWarm regards,\nPriyanshu Raj | 93191\nhttps://www.linkedin.com/in/test/"
+    "Dear Team,\n\nI build <script>alert(1)</script> things & more.\n\nWarm regards,\nJARVIS | 93191\nhttps://www.linkedin.com/in/test/"
   );
   assert.equal((html.match(/<p /g) || []).length, 3);
-  assert.ok(html.includes("Warm regards,<br>Priyanshu Raj | 93191<br>"));
+  assert.ok(html.includes("Warm regards,<br>JARVIS | 93191<br>"));
   assert.ok(html.includes('<a href="https://www.linkedin.com/in/test/"'));
   assert.ok(!html.includes("<script>"), "user text must be escaped");
   assert.ok(html.includes("&lt;script&gt;") && html.includes("&amp; more"));
@@ -53,10 +53,10 @@ test("textToHtml makes paragraphs, line breaks and links — and escapes HTML", 
 
 test("signatureBlock: default sign-off, or the user's own signature", () => {
   assert.equal(
-    signatureBlock({ phone: "93191", linkedinUrl: "https://linkedin.com/in/x" }, "Priyanshu Raj"),
-    "Warm regards,\nPriyanshu Raj | 93191\nhttps://linkedin.com/in/x"
+    signatureBlock({ phone: "93191", linkedinUrl: "https://linkedin.com/in/x" }, "JARVIS"),
+    "Warm regards,\nJARVIS | 93191\nhttps://linkedin.com/in/x"
   );
-  assert.equal(signatureBlock({ signature: "  Best,\nP  " }, "Priyanshu"), "Best,\nP");
+  assert.equal(signatureBlock({ signature: "  Best,\nP  " }, "JARVIS"), "Best,\nP");
 });
 
 test("MIME builder blocks header injection via newlines", () => {

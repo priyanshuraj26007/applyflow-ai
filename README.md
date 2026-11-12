@@ -140,6 +140,20 @@ extension/
   common.js/css        shared helpers & styles
 ```
 
+### Quick check scripts (`backend/test-*.js`)
+These standalone scripts came from the first day of the project, before the app was built. They
+were used to check that the API keys worked and to compare AI providers. They aren't part of the
+app and aren't needed to run it.
+
+| Script | What it does |
+|---|---|
+| `test-gemini.js` | Sends one "Hello" prompt to Gemini to confirm `GEMINI_API_KEY` works. |
+| `test-job-analysis.js` | Runs a sample LinkedIn post through job analysis. |
+| `test-openai.js` | Sends one "Hello" prompt to OpenAI. An early experiment: ApplyFlow was built on **Gemini** instead, and the app never calls OpenAI. Kept only for reference, and needs `OPENAI_API_KEY` if you run it. |
+
+Run one with `node test-gemini.js` from the `backend` folder. The real automated tests are in
+`tests/` (`npm.cmd test`).
+
 ## 4. Configuration (`backend/.env`)
 | Variable | Purpose |
 |---|---|

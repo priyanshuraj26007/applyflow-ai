@@ -120,6 +120,11 @@ Scroll LinkedIn ─▶ "Hiring post detected" card appears
 extension can be read by anyone who installs it. Keeping keys in `backend/.env` on the user's
 machine means they're never exposed.
 
+**Choosing the AI provider.** On day one we wrote two quick check scripts:
+`backend/test-gemini.js` and `backend/test-openai.js`. The product was then built entirely on
+**Google Gemini**, and OpenAI is not used anywhere in the app. `test-openai.js` stays in the repo
+only as a record of that early experiment.
+
 ### 7.2 Making AI fast and reliable
 - **Model tiers** (`lib/gemini.js`):
   - `fast` handles post analysis.
