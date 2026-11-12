@@ -9,6 +9,14 @@
   Chrome extension · Node.js · Google Gemini · Gmail API
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/02-window-light.png" width="860" alt="ApplyFlow floating window on a LinkedIn-style feed: job details, resume match scores and drafted email">
+</p>
+
+<p align="center">
+  🎨 <b><a href="SHOWCASE.md">See the full product showcase →</a></b> every screen, light and dark mode, and the design system
+</p>
+
 ---
 
 Many good jobs on LinkedIn are posted as ordinary feed posts: *"We're hiring, send your resume
@@ -26,6 +34,8 @@ attaching a PDF, which takes 10–15 minutes every time.
 
 > 📘 Read the **[Product Requirements Document (PRD.md)](PRD.md)** for the full story: the problem,
 > goals, requirements, architecture and the decisions behind it.
+>
+> 🎨 Read the **[Product Showcase (SHOWCASE.md)](SHOWCASE.md)** to see what the final version looks like.
 
 ## How it works
 

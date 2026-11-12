@@ -160,6 +160,8 @@ full resume text, and plans the email before writing it.
   - a paper-plane app icon,
   - a **floating, draggable window** (top-right) instead of a side drawer, so the feed stays visible.
 
+  Screenshots of every screen, plus the design tokens, are in **[SHOWCASE.md](SHOWCASE.md)**.
+
 ## 8. Release history
 
 | Version | Highlights |
