@@ -17,7 +17,7 @@ async function api(path, { method = "GET", body, form, timeout = 30000 } = {}) {
   } catch (error) {
     const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
     throw Object.assign(new Error(timedOut
-      ? "The request took too long. Gemini may be busy — please try again."
+      ? "The request took too long. The AI may be busy — please try again."
       : "Can't reach the ApplyFlow backend. Start it with: npm.cmd start (inside the backend folder)."),
       { code: timedOut ? "TIMEOUT" : "BACKEND_OFFLINE" });
   }

@@ -12,7 +12,7 @@ process.env.APPLYFLOW_DATA_DIR = tmpDir;
 
 const { buildMimeMessage, EMAIL_RE, textToHtml } = await import("../lib/gmail.js");
 const { signatureBlock } = await import("../lib/ai.js");
-const { normaliseJob, normaliseRankings } = await import("../lib/ai.js");
+const { normaliseJob, normaliseRankings, toScore } = await import("../lib/ai.js");
 const { hashPost, roleKey, upsertFromPost, editApplication, findDuplicates } = await import("../lib/applications.js");
 const { readJson, updateJson } = await import("../lib/store.js");
 const { assertPdf } = await import("../lib/resumes.js");
@@ -157,4 +157,18 @@ test("assertPdf accepts real PDFs and rejects fakes / oversized files", () => {
   assert.throws(() => assertPdf(Buffer.from("MZ executable pretending")), /not a valid PDF/);
   assert.throws(() => assertPdf(Buffer.alloc(0)), /empty/);
   assert.throws(() => assertPdf(Buffer.alloc(6 * 1024 * 1024, 0x25)), /5 MB/);
+});
+
+test("toScore understands digits, percentages and numbers written as words", () => {
+  assert.equal(toScore(72), 72);
+  assert.equal(toScore("85"), 85);
+  assert.equal(toScore("64%"), 64);
+  assert.equal(toScore("thirty"), 30);
+  assert.equal(toScore("seventy-two"), 72);
+  assert.equal(toScore("Eighty five"), 85);
+  assert.equal(toScore("nine"), 9);
+  assert.equal(toScore("one hundred"), 100);
+  assert.equal(toScore(140), 100);
+  assert.equal(toScore("n/a"), 0);
+  assert.equal(toScore(null), 0);
 });

@@ -213,7 +213,7 @@ function renderResumes() {
           ${analysisBadge(r)}
         </div>
 
-        ${r.analysisStatus === "failed" ? `<div class="banner warn" style="margin:12px 0 0">${esc(r.analysisError || "Gemini couldn't analyse this resume.")}</div>` : ""}
+        ${r.analysisStatus === "failed" ? `<div class="banner warn" style="margin:12px 0 0">${esc(r.analysisError || "The AI couldn't analyse this resume.")}</div>` : ""}
 
         ${p ? `
           <div class="resume-body">
@@ -328,7 +328,7 @@ $("#replaceInput").addEventListener("change", async () => {
   form.append("file", file);
   try {
     await api(`/api/resumes/${encodeURIComponent(replaceTarget)}/file`, { method: "PUT", form, timeout: 60000 });
-    toast("PDF replaced — re-analysing with Gemini…");
+    toast("PDF replaced — re-analysing with AI…");
     loadResumes();
   } catch (error) {
     handleError(error);
@@ -353,7 +353,7 @@ $("#uploadForm").addEventListener("submit", async (e) => {
   try {
     await uploadResume(file, $("#upLabel").value.trim(), $("#upCategory").value);
     $("#uploadForm").reset();
-    toast("Uploaded! Gemini is analysing it now…");
+    toast("Uploaded! The AI is analysing it now…");
     loadResumes();
   } catch (error) {
     handleError(error);
@@ -410,7 +410,7 @@ $("#migrateBtn").addEventListener("click", async () => {
   }
   await chrome.storage.local.set({ oldLibraryImported: true }).catch(() => {});
   $("#migrateBanner").classList.add("hidden");
-  toast(`Imported ${ok} of ${old.length} resumes. Gemini is analysing them…`);
+  toast(`Imported ${ok} of ${old.length} resumes. The AI is analysing them…`);
   loadResumes();
 });
 
@@ -424,8 +424,13 @@ async function loadSettings() {
     for (const el of $("#settingsForm").elements) {
       if (el.name && s[el.name] !== undefined) el.value = s[el.name];
     }
+    aboutMePrompt = settingsData.aboutMePrompt || "";
+    defaultSkeleton = settingsData.defaultSkeleton || "";
+    if (!$("#sSkeleton").value.trim()) $("#sSkeleton").value = defaultSkeleton;
+    renderAboutMe(settingsData.aboutMe);
     renderGmail(status.gmail);
     $("#geminiInfo").innerHTML = `
+      <dt>Draft models</dt><dd>${esc((status.models.draft || []).join(" → "))}</dd>
       <dt>Fast models</dt><dd>${esc(status.models.fast.join(" → "))}</dd>
       <dt>Smart models</dt><dd>${esc(status.models.smart.join(" → "))}</dd>
       <dt>Resumes analysed</dt><dd>${status.analysedResumes} of ${status.resumes}</dd>`;
@@ -471,12 +476,59 @@ function renderGmail(g) {
   }
 }
 
+// ---------- About me (context from the user's own AI) ----------
+let aboutMePrompt = "";
+let defaultSkeleton = "";
+let aboutPollTimer = null;
+
+function renderAboutMe(state) {
+  const status = $("#aboutStatus");
+  const box = $("#aboutCompactBox");
+  clearTimeout(aboutPollTimer);
+  box.classList.add("hidden");
+  if (!state || state.status === "none") {
+    status.textContent = "Not added yet — emails will use your resume only.";
+  } else if (state.status === "condensing" || state.status === "pending") {
+    status.innerHTML = `<span class="spinner"></span> Condensing your profile into a short fact sheet…`;
+    aboutPollTimer = setTimeout(refreshAboutMe, 3000);
+  } else if (state.status === "ready") {
+    status.textContent = `✓ Ready — condensed from ${state.sourceWords} to ${state.words} words. Every email now uses it.`;
+    $("#aboutCompact").textContent = state.compact || "";
+    box.classList.remove("hidden");
+  } else if (state.status === "failed") {
+    status.textContent = `Couldn't condense it (${state.error || "AI busy"}). Emails will use the full text — press Save to try again.`;
+  }
+}
+
+async function refreshAboutMe() {
+  try {
+    renderAboutMe((await api("/api/settings")).aboutMe);
+  } catch { /* backend offline is reported elsewhere */ }
+}
+
+$("#copyAboutPrompt").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(aboutMePrompt);
+    toast("Prompt copied — paste it into ChatGPT, Claude or Gemini.");
+  } catch {
+    toast("Couldn't copy automatically. Open the dashboard in a normal tab and try again.", "error");
+  }
+});
+
+$("#resetSkeleton").addEventListener("click", () => {
+  $("#sSkeleton").value = defaultSkeleton;
+  toast("Skeleton reset — press Save settings to keep it.");
+});
+
 $("#settingsForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = {};
   for (const el of $("#settingsForm").elements) if (el.name) body[el.name] = el.value;
+  // Store an unchanged default skeleton as "" so future improvements to the default apply.
+  if (body.emailSkeleton?.trim() === defaultSkeleton.trim()) body.emailSkeleton = "";
   try {
-    await api("/api/settings", { method: "PUT", body });
+    const saved = await api("/api/settings", { method: "PUT", body });
+    renderAboutMe(saved.aboutMe);
     $("#settingsSaved").textContent = "Saved";
     setTimeout(() => { $("#settingsSaved").textContent = ""; }, 2500);
   } catch (error) {

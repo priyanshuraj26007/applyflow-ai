@@ -2,7 +2,8 @@
 // APPLYFLOW AI — LOCAL BACKEND
 // ==========================================
 // Routes only. The real work lives in ./lib:
-//   gemini.js        model tiers, retries, fallbacks, error classification
+//   ai-router.js     AI providers (Groq, Gemini), racing, fallbacks, retries
+//   gemini.js/groq.js one request to one provider
 //   ai.js            prompts + validation (job, resume, match, email)
 //   resumes.js       PDF upload/validation/extraction + resume library
 //   applications.js  application tracking + duplicate detection
@@ -14,8 +15,9 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 
-import { callGemini, MODEL_TIERS } from "./lib/gemini.js";
-import { analyzeJobPost, matchResumes, generateEmail, draftApplication, normaliseJob } from "./lib/ai.js";
+import { callAI, MODEL_TIERS, PROVIDER_ORDER } from "./lib/ai-router.js";
+import { analyzeJobPost, matchResumes, writeEmail, draftApplication, normaliseJob, DEFAULT_EMAIL_SKELETON } from "./lib/ai.js";
+import { ABOUT_ME_PROMPT, aboutMeState, ensureCondensed, aboutMeForPrompt } from "./lib/about-me.js";
 import {
   listResumes, getResume, addResume, replaceResumeFile, editResume, deleteResume,
   analyseAndSave, publicResume, resumeFilePath, MAX_RESUME_BYTES
@@ -27,8 +29,8 @@ import {
 import * as gmail from "./lib/gmail.js";
 import { getSettings, saveSettings } from "./lib/settings.js";
 
-if (!process.env.GEMINI_API_KEY) {
-  console.error("GEMINI_API_KEY is missing. Check your .env file.");
+if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
+  console.error("No AI key found. Add GROQ_API_KEY and/or GEMINI_API_KEY to backend/.env.");
   process.exit(1);
 }
 
@@ -126,8 +128,8 @@ app.get("/api/status", route(async (req, res) => {
 }));
 
 app.get("/api/test-gemini", aiLimiter, route(async (req, res) => {
-  console.log("ApplyFlow AI: Sending test request to Gemini...");
-  const result = await callGemini("fast", "Reply with exactly: ApplyFlow AI connected successfully!");
+  console.log("ApplyFlow AI: Sending test request to the AI...");
+  const result = await callAI("fast", "Reply with exactly: ApplyFlow AI connected successfully!");
   res.json({
     success: true,
     message: result.text,
@@ -262,20 +264,22 @@ app.post("/api/applications/:id/prepare", aiLimiter, route(async (req, res) => {
     to: record.email?.to || record.job.email || "",
     subject: generated.subject,
     body: generated.body,
+    eligibility: generated.eligibility || null,
     resumeId: forResumeId,
     generatedWith: generated.model,
     generatedAt: now()
   });
 
+  const profileText = await aboutMeForPrompt(settings);
   let match = record.match;
   let email = record.email;
   let chosenId;
   const started = Date.now();
 
   if (needMatch && !(userChoice && emailFor(userChoice))) {
-    // FAST PATH: score resumes + write the email in ONE Gemini call.
+    // Score resumes + write the email (in parallel when the resume is already known).
     const draft = await draftApplication({
-      job: record.job, postText: record.postText, resumes: analysed, settings, preferredResumeId: userChoice
+      job: record.job, postText: record.postText, resumes: analysed, settings, preferredResumeId: userChoice, profileText
     });
     match = { rankings: draft.rankings, recommendedResumeId: draft.recommendedResumeId, model: draft.model, libraryKey, matchedAt: now() };
     chosenId = draft.emailResumeId;
@@ -289,11 +293,12 @@ app.post("/api/applications/:id/prepare", aiLimiter, route(async (req, res) => {
     // Resume choice — user override > previous choice > AI recommendation.
     chosenId = userChoice || match.recommendedResumeId;
     if (!emailFor(chosenId)) {
-      const generated = await generateEmail({
+      const generated = await writeEmail({
         job: record.job,
         postText: record.postText,
         resume: analysed.find(r => r.id === chosenId),
-        settings
+        settings,
+        profileText
       });
       email = makeEmail(generated, chosenId);
     }
@@ -423,10 +428,17 @@ app.get("/api/resumes/:id/file", route(async (req, res) => {
 // SETTINGS
 // ------------------------------------------
 app.get("/api/settings", route(async (req, res) => {
-  res.json({ success: true, settings: await getSettings() });
+  const settings = await getSettings();
+  res.json({
+    success: true, settings,
+    aboutMe: await aboutMeState(settings),
+    aboutMePrompt: ABOUT_ME_PROMPT,
+    defaultSkeleton: DEFAULT_EMAIL_SKELETON
+  });
 }));
 app.put("/api/settings", route(async (req, res) => {
-  res.json({ success: true, settings: await saveSettings(req.body || {}) });
+  const settings = await saveSettings(req.body || {});
+  res.json({ success: true, settings, aboutMe: await ensureCondensed(settings) });
 }));
 
 // ------------------------------------------
@@ -500,7 +512,10 @@ app.use((error, req, res, next) => {
 // ------------------------------------------
 const server = app.listen(PORT, "127.0.0.1", () => {
   console.log(`ApplyFlow AI backend running at http://127.0.0.1:${PORT}`);
-  console.log(`Gemini models - fast: ${MODEL_TIERS.fast.join(" → ")} | smart: ${MODEL_TIERS.smart.join(" → ")}`);
+  console.log(`AI providers: ${PROVIDER_ORDER.join(" → ")}`);
+  console.log(`  draft: ${MODEL_TIERS.draft.join(" → ")}`);
+  console.log(`  fast:  ${MODEL_TIERS.fast.join(" → ")}`);
+  console.log(`  smart: ${MODEL_TIERS.smart.join(" → ")}`);
   if (!gmail.isConfigured()) console.log("Gmail: not configured yet (add GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET to .env).");
 });
 

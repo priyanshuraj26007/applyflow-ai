@@ -48,3 +48,12 @@ table.apps { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
   .upload-grid, .settings-grid, .resume-body, .two { grid-template-columns: 1fr; }
 }
+
+/* Settings → About me (context imported from the user's own AI) + email skeleton */
+.about-me { padding: 14px 16px; margin: 0 0 16px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--hairline); }
+.about-me > label { margin-top: 0; }
+.about-me .steps { margin: 0 0 10px; }
+.label-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.label-row label { margin-bottom: 4px; }
+.compact-pre { white-space: pre-wrap; font: inherit; font-size: 12.5px; line-height: 1.55; color: var(--text-2); max-height: 320px; overflow: auto; margin: 8px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--hairline); }
+#sSkeleton { font-size: 13px; line-height: 1.55; }

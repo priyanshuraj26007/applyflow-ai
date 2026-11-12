@@ -5,7 +5,7 @@
 | **Product** | ApplyFlow AI — an AI assistant for applying to LinkedIn hiring posts |
 | **Status** | v2.2 — shipped for personal use, tested end-to-end |
 | **Platform** | Chrome extension (Manifest V3) + local Node.js backend |
-| **AI** | Google Gemini (with automatic model fallback) |
+| **AI** | Groq (primary) + Google Gemini (backup), with automatic fallback |
 | **Last updated** | November 2026 |
 
 ---
@@ -113,7 +113,7 @@ Scroll LinkedIn ─▶ "Hiring post detected" card appears
 │  lib/store.js    safe JSON storage in backend/data/            │
 └──────────┬──────────────────────────────────┬─────────────────┘
            ▼                                  ▼
-     Google Gemini API                   Gmail API (send only)
+  Groq API → Gemini API (backup)          Gmail API (send only)
 ```
 
 **Why a local backend instead of calling Gemini from the extension?** Anything inside an
@@ -127,6 +127,7 @@ entirely on Gemini, and OpenAI is not used anywhere in the app. `test-openai.js`
 only as a record of that early experiment.
 
 ### 7.2 Making AI fast and reliable
+- **Two providers (v2.3).** On the free tier, Gemini returned "high demand" (503) on **12 of 12** test drafts during a busy period. A head-to-head speed test on the real draft prompt showed Groq's `gpt-oss-120b` at **~2.6 s median**, with good, accurate emails. Groq is now primary (`gpt-oss-120b` → `gpt-oss-20b`), and Gemini is the backup. Groq runs with low reasoning effort (≈2x faster, same quality) and strict JSON. If the model slips (e.g. writes a score as "thirty"), its answer is repaired instead of thrown away.
 - **Model tiers** (`lib/gemini.js`):
   - `fast` handles post analysis.
   - `smart` handles the one-time resume analysis, where quality matters more than speed.
@@ -144,6 +145,19 @@ only as a record of that early experiment.
 Early drafts were clipped and robotic. Instead of maintaining a list of banned phrases, we let the
 user paste an email they like, and the model imitates that style. It also gets the full post and
 full resume text, and plans the email before writing it.
+
+### 7.3b Emails that sound like the user (v2.4)
+Blind tests (3 real posts; ApplyFlow variants vs the user's favourite ChatGPT emails, unlabelled) showed ChatGPT
+winning 6 of 6 rounds. The reason was **context and voice**, not prompt cleverness: ChatGPT knew the user (final year,
+project names, AI experience), while ApplyFlow guessed from the resume and drifted into template phrases.
+- **About me import:** a copyable prompt makes the user's own AI write a career profile (facts, honest skill levels,
+  email preferences, a "never claim" list). ApplyFlow condenses it once into a ~700-word fact sheet.
+- **Skeleton + blanks:** the user's favourite emails were ~70% identical wording. The AI now keeps that skeleton and
+  only fills the blanks (which skills, which 1-2 projects, what interests them about this job).
+- **Eligibility check:** hard requirements the user doesn't meet (e.g. "2 actuarial exams cleared") are flagged
+  above the email instead of being hidden or invented.
+- **Token budget:** post reading and resume scoring run on the small model; the big model's free per-minute budget
+  is kept for the email itself.
 
 ### 7.4 Security and privacy
 - The backend binds to `127.0.0.1`. **Host-header checks** block DNS-rebinding attacks.
@@ -171,6 +185,8 @@ full resume text, and plans the email before writing it.
 | **V1** | End-to-end flow: LinkedIn detection → Gemini analysis → resume match → email draft → Gmail send with PDF. |
 | **v2.1** | In-page side panel, one-shot drafting (21.6 s → 3.9 s), model racing, black + indigo design. |
 | **v2.2** | Monochrome light/dark redesign, new icon, floating draggable window, better email quality from the user's style example. |
+| **v2.3** | Groq as primary AI with Gemini backup: drafts in ~2–3 s instead of failing during Gemini outages. Retry rounds and instant fallback. |
+| **v2.4** | Two-step flow (instant card → job summary → Generate application), Repost-button post detection, About me import from the user's own AI, skeleton-based email writer, eligibility warnings. |
 
 ## 9. Limitations and future work
 - **Gmail Testing mode:** the Google OAuth app is in Testing mode, so the Gmail connection expires every 7 days and the user must reconnect.

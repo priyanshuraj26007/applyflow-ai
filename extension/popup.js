@@ -111,7 +111,7 @@ analyzeButton.addEventListener("click", async () => {
   }).catch(error => ({ success: false, error: error.message }));
 
   analyzeButton.disabled = false;
-  analyzeButton.textContent = "Analyse with Gemini";
+  analyzeButton.textContent = "Analyse with AI";
 
   if (!result?.success) {
     status.textContent = result?.error || "Analysis failed.";
@@ -122,7 +122,7 @@ analyzeButton.addEventListener("click", async () => {
   const job = result.jobData;
 
   if (!job.isHiringPost) {
-    status.textContent = "Gemini doesn't think this is a hiring post.";
+    status.textContent = "The AI doesn't think this is a hiring post.";
   } else {
     status.textContent = "Job analysis completed! Please verify the details.";
   }

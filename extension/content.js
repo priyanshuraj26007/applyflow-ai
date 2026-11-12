@@ -7,6 +7,7 @@ console.log("ApplyFlow AI: LinkedIn detector activated!");
 
 const processedPosts = new WeakSet();   // DOM containers already handled
 const processedKeys = new Set();        // post text fingerprints (survives LinkedIn re-rendering)
+const unplacedTexts = new Set();        // hiring text we couldn't attach to a post (logged once)
 
 // Pages where we never scan (V1 focuses on feed hiring posts, not LinkedIn Jobs).
 const SKIPPED_PATHS = /^\/(jobs|messaging|notifications|mynetwork|learning|premium|search\/results\/(jobs|people))/;
@@ -52,15 +53,40 @@ const POST_SELECTORS = [
   "div[role='article']"
 ].join(",");
 
+// Every post has exactly one "Repost" button in its action bar (comments don't),
+// so it's a layout-independent way to find where a post starts and ends.
+function repostButtonCount(el) {
+  let n = 0;
+  for (const b of el.querySelectorAll("button, [role='button']")) {
+    const label = `${b.getAttribute("aria-label") || ""} ${b.textContent || ""}`;
+    if (/\brepost\b/i.test(label)) n++;
+    if (n > 1) break;
+  }
+  return n;
+}
+
 function findHiringPostContainer(element) {
-  // 1. Prefer LinkedIn's own post markers when present.
+  // 1. Prefer LinkedIn's own post markers when present (and they wrap just one post).
   const marked = element.closest(POST_SELECTORS);
   if (marked) {
     const len = (marked.innerText || "").length;
-    if (len > 80 && len < 15000) return marked;
+    if (len > 80 && len < 15000 && repostButtonCount(marked) <= 1) return marked;
   }
 
-  // 2. Fallback: the original heuristic that worked on the user's interface.
+  // 2. Layout-independent: the nearest ancestor that holds ONE post action bar.
+  let node = element.parentElement;
+  for (let level = 0; level < 25 && node && node !== document.body; level++) {
+    const count = repostButtonCount(node);
+    if (count > 1) break;                       // climbed past the post into the feed
+    if (count === 1) {
+      const len = (node.innerText || "").length;
+      if (len > 30 && len < 20000) return node;
+      break;
+    }
+    node = node.parentElement;
+  }
+
+  // 3. Fallback: the original heuristic that worked on the user's interface.
   let current = element;
 
   for (let level = 0; level < 10 && current; level++) {
@@ -147,7 +173,16 @@ function detectHiringPosts() {
 
     const postContainer = findHiringPostContainer(element);
 
-    if (!postContainer || processedPosts.has(postContainer)) {
+    if (!postContainer) {
+      // Hiring words found but not the post around them — log once so misses can be diagnosed.
+      const key = raw.slice(0, 80);
+      if (!unplacedTexts.has(key)) {
+        unplacedTexts.add(key);
+        console.warn("ApplyFlow AI: hiring text found, but couldn't locate its post on the page:", key);
+      }
+      return;
+    }
+    if (processedPosts.has(postContainer)) {
       return;
     }
 
@@ -162,23 +197,9 @@ function detectHiringPosts() {
 
     console.log("ApplyFlow AI: Hiring post detected!");
 
+    // Instant card from local text matching — the AI only runs when the user opens it.
     const sourceUrl = sourceUrlFor(postContainer);
     applyFlowPopup.addPost({ postId, postText, sourceUrl, element: postContainer });
-
-    try {
-      chrome.runtime.sendMessage({
-        type: "HIRING_POST_DETECTED",
-        postId,
-        postText,
-        sourceUrl
-      }, () => void chrome.runtime.lastError);
-    } catch (error) {
-      // Happens if the extension was reloaded while this LinkedIn tab stayed open.
-      applyFlowPopup.update(postId, {
-        state: "fallback",
-        error: "ApplyFlow AI was updated. Refresh this LinkedIn page."
-      });
-    }
   });
 }
 
@@ -371,7 +392,10 @@ function displayJobFromAi(aiJob, localJob) {
     category: aiJob.category || localJob.category || "General",
     skills: Array.isArray(aiJob.skills) ? aiJob.skills : [],
     applicationInstructions: aiJob.applicationInstructions || "Not specified",
-    deadline: aiJob.deadline || null
+    deadline: aiJob.deadline || null,
+    experienceLevel: aiJob.experienceLevel || null,
+    employmentType: aiJob.employmentType || null,
+    requirements: Array.isArray(aiJob.requirements) ? aiJob.requirements : []
   };
 }
 
@@ -383,15 +407,16 @@ function displayJobFromAi(aiJob, localJob) {
 // APPLYFLOW AI - NOTIFICATION + FLOATING WINDOW (v2.2)
 // ==========================================
 // 1. A frosted notification drops in at the top right: "Hiring post detected".
-// 2. Click it → the same card expands into a floating window (job, resume
-//    match, editable email, Send → Confirm). LinkedIn stays fully usable.
-// 3. Drag the window by its header; it remembers where you left it.
+// 2. Click it → the card expands into a floating window and the AI reads the post:
+//    a job summary (company, role, fresher/experienced, skills, requirements).
+// 3. "Generate application" → resume match + editable email → Send → Confirm.
+//    Posts that are only scrolled past never use the AI (saves quota).
+// 4. Drag the window by its header; it remembers where you left it.
 //    Double-click the header to snap it back to the corner.
 // Everything lives in one Shadow DOM so LinkedIn's CSS can't break it.
 // Light/dark follows LinkedIn's own theme. Icons come from icons.js (AF_ICONS).
 // This page never talks to the backend directly — every call goes through background.js.
 
-const SAFETY_TIMEOUT_MS = 80000;
 const CONFIRM_WINDOW_MS = 6000;
 const EMAIL_PATTERN = /^[^\s@<>(),;:"\[\]\\]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 const DEFAULT_POSITION = { right: 20, top: 64 }; // just below LinkedIn's top bar
@@ -502,8 +527,9 @@ const applyFlowPopup = (() => {
     const localJob = extractJobInformation(postText);
     return {
       postId, postText, sourceUrl, element,
-      state: "analysing",           // analysing | ai | fallback
+      state: "detected",            // detected | analysing | ai | fallback
       startedAt: Date.now(),
+      notHiring: false,             // the AI says this isn't a job opening
       localJob,
       job: localJob,
       aiJob: null,
@@ -526,11 +552,6 @@ const applyFlowPopup = (() => {
     const post = newPostState(info);
     posts.push(post);
 
-    // Never leave a post stuck in "analysing".
-    post.safetyTimer = setTimeout(() => {
-      if (post.state === "analysing") update(post.postId, { state: "fallback", error: "Gemini did not respond in time." });
-    }, SAFETY_TIMEOUT_MS);
-
     if (mode === "panel") {
       render(); // just refreshes the "1 of N" counter
       return;
@@ -544,20 +565,12 @@ const applyFlowPopup = (() => {
     const post = posts.find(p => p.postId === postId);
     if (!post) return;
     Object.assign(post, changes);
-    if (post.state !== "analysing") clearTimeout(post.safetyTimer);
-
-    // Window was opened while Gemini was still reading the post → start drafting now.
-    if (mode === "panel" && post === current() && post.state !== "analysing" && post.draft.status === "idle") {
-      startDraft(post);
-      return;
-    }
     render();
   }
 
   function removePost(postId) {
     const i = posts.findIndex(p => p.postId === postId);
     if (i === -1) return;
-    clearTimeout(posts[i].safetyTimer);
     posts.splice(i, 1);
     if (index >= posts.length) index = posts.length - 1;
     if (!posts.length) mode = "hidden";
@@ -622,7 +635,7 @@ const applyFlowPopup = (() => {
     position = clampPosition(position);
     render();
     loadContext();
-    if (post && post.state !== "analysing" && post.draft.status === "idle") startDraft(post);
+    if (post) analysePost(post);
   }
 
   function closePanel() {
@@ -639,6 +652,32 @@ const applyFlowPopup = (() => {
     }
   }
 
+  // Step 1 (on open): the AI reads the post → job summary. Runs once per post.
+  async function analysePost(post) {
+    if (post.state !== "detected") return;
+    post.state = "analysing";
+    post.startedAt = Date.now();
+    post.error = null;
+    render();
+
+    const response = await sendToBackground({
+      type: "ANALYZE_POST", postId: post.postId, postText: post.postText, sourceUrl: post.sourceUrl
+    });
+    if (response.success && response.jobData) {
+      post.aiJob = response.jobData;
+      post.job = displayJobFromAi(response.jobData, post.localJob);
+      post.applicationId = response.applicationId || post.applicationId;
+      post.alreadyApplied = !!response.alreadyApplied;
+      post.notHiring = response.jobData.isHiringPost === false;
+      post.state = "ai";
+    } else {
+      post.state = "fallback";
+      post.error = response.error || "The AI couldn't read this post.";
+    }
+    render();
+  }
+
+  // Step 2 (on "Generate application"): resume match + email.
   async function startDraft(post, options = {}) {
     post.draft = { status: "loading", startedAt: Date.now() };
     post.send = { status: "idle" };
@@ -664,8 +703,9 @@ const applyFlowPopup = (() => {
       post.edited = false;
       post.saveNote = "";
       if (app.job && app.analysisSource === "gemini") {
-        post.aiJob = app.job;
-        post.job = displayJobFromAi(app.job, post.localJob);
+        // Keep summary fields from the earlier read if this record lacks them.
+        post.aiJob = { ...(post.aiJob || {}), ...Object.fromEntries(Object.entries(app.job).filter(([, v]) => v != null && !(Array.isArray(v) && !v.length))) };
+        post.job = displayJobFromAi(post.aiJob, post.localJob);
       }
       post.draft = { status: "ready", seconds: ((Date.now() - post.draft.startedAt) / 1000).toFixed(1) };
       if (app.sentMessageId) post.send = { status: "sent" };
@@ -808,6 +848,15 @@ const applyFlowPopup = (() => {
       case "retry":
         if (post) startDraft(post);
         break;
+      case "generate":
+        if (post && post.state !== "analysing") startDraft(post);
+        break;
+      case "reanalyse":
+        if (post) { post.state = "detected"; analysePost(post); }
+        break;
+      case "remove-post":
+        if (post) removePost(post.postId);
+        break;
       case "regenerate":
         if (post && (!post.edited || confirm("Rewrite the email? Your edits will be replaced."))) startDraft(post, { regenerate: true });
         break;
@@ -832,8 +881,8 @@ const applyFlowPopup = (() => {
 
   function afterNavigate() {
     const post = current();
-    if (mode === "panel" && post && post.state !== "analysing" && post.draft.status === "idle") startDraft(post);
-    else render();
+    render();
+    if (mode === "panel" && post) analysePost(post);
   }
 
   function onInput(event) {
@@ -906,7 +955,7 @@ const applyFlowPopup = (() => {
     let right;
     if (post.state === "analysing") right = `<span class="pill ghost"><span class="spin"></span>Reading</span>`;
     else if (post.send.status === "sent" || post.alreadyApplied) right = `<span class="pill ghost">${I.check(13)}Applied</span>`;
-    else right = `<span class="pill solid">Draft</span>`;
+    else right = `<span class="pill solid">View</span>`;
 
     return `
       <div class="toast" data-action="open" role="button" tabindex="0" aria-label="Open ApplyFlow">
@@ -941,9 +990,11 @@ const applyFlowPopup = (() => {
     const job = post.job;
     const meta = [clean(job.companyName), clean(job.location)].filter(Boolean).join(" · ");
     const recruiter = clean(job.recruiterName);
-    const sourceBadge = post.state === "analysing"
+    const sourceBadge = post.state === "analysing" || post.state === "detected"
       ? `<span class="tag"><span class="spin"></span>Reading post</span>`
-      : post.aiJob ? `<span class="tag">${I.sparkle(12)}Analysed by Gemini</span>` : `<span class="tag">Basic extraction</span>`;
+      : post.aiJob ? `<span class="tag">${I.sparkle(12)}Analysed by AI</span>` : `<span class="tag">Basic extraction</span>`;
+    const levelTags = [job.employmentType, job.experienceLevel].filter(Boolean)
+      .map(t => `<span class="tag">${e(t)}</span>`).join("");
     const appliedBefore = (post.duplicates || []).some(d => d.appliedAt) && post.send.status !== "sent";
 
     return `
@@ -959,22 +1010,11 @@ const applyFlowPopup = (() => {
 
         <div class="body">
           <section class="job">
-            <div class="row">${sourceBadge}${post.send.status === "sent" ? `<span class="tag ok">${I.check(12)}Applied</span>` : ""}</div>
+            <div class="row">${sourceBadge}${levelTags}${post.send.status === "sent" ? `<span class="tag ok">${I.check(12)}Applied</span>` : ""}</div>
             <h2>${e(clean(job.jobTitle) || "Hiring opportunity")}</h2>
             ${meta || recruiter ? `<p class="meta">${e(meta)}${meta && recruiter ? " · " : ""}${recruiter ? `Recruiter ${e(recruiter)}` : ""}</p>` : ""}
             ${appliedBefore ? `<div class="note">You've already applied to what looks like this same opening.</div>` : ""}
-            <details class="details">
-              <summary>Job details ${I.chevronRight(12)}</summary>
-              <dl class="kv">
-                ${detailRow("Experience", job.experience)}
-                ${detailRow("Joining", job.joining)}
-                ${detailRow("Deadline", job.deadline)}
-                ${detailRow("Category", job.category)}
-                ${detailRow("Skills", (job.skills || []).join(", "))}
-                ${detailRow("How to apply", job.applicationInstructions)}
-              </dl>
-              <button class="link" data-action="view">Show post on page</button>
-            </details>
+            ${summaryHtml(post)}
           </section>
 
           ${draftSectionHtml(post)}
@@ -984,9 +1024,51 @@ const applyFlowPopup = (() => {
       </aside>`;
   }
 
+  // Job summary: shown in full until an application is generated, then folded away.
+  function summaryHtml(post) {
+    const job = post.job;
+    if (post.state === "analysing" || post.state === "detected") {
+      return `
+        <div class="loading-line" style="margin-top:14px"><span class="spin"></span>Reading the post<span class="dots"></span> <span class="secs"></span></div>
+        <div class="skeleton" style="height:14px;width:70%"></div>
+        <div class="skeleton" style="height:14px;width:55%"></div>
+        <div class="skeleton" style="height:14px;width:62%"></div>`;
+    }
+    const skills = (job.skills || []).length
+      ? `<div class="sum-label">Skills</div><div class="chips">${job.skills.slice(0, 12).map(x => `<span class="chip solid">${e(x)}</span>`).join("")}</div>` : "";
+    const reqs = (job.requirements || []).length
+      ? `<div class="sum-label">Requirements</div><ul class="reqs">${job.requirements.map(x => `<li>${e(x)}</li>`).join("")}</ul>` : "";
+    const rows = `
+      <dl class="kv">
+        ${detailRow("Experience", job.experience)}
+        ${detailRow("Apply to", job.recruiterEmail)}
+        ${detailRow("How to apply", job.applicationInstructions)}
+        ${detailRow("Joining", job.joining)}
+        ${detailRow("Deadline", job.deadline)}
+      </dl>`;
+    const notes = [
+      post.notHiring ? `<div class="note">${I.warning(15)}<span>The AI doesn't think this is a job opening. <button class="link" data-action="remove-post">Remove it</button></span></div>` : "",
+      post.state === "fallback" && post.error ? `<div class="note">${I.warning(15)}<span>${e(post.error)} Showing basic details. <button class="link" data-action="reanalyse">Try again</button></span></div>` : ""
+    ].join("");
+    const content = `${rows}${skills}${reqs}<button class="link" data-action="view">Show post on page</button>`;
+
+    // Once an application exists, fold the summary so the email gets the space.
+    if (post.draft.status !== "idle") {
+      return `${notes}<details class="details"><summary>Job summary ${I.chevronRight(12)}</summary>${content}</details>`;
+    }
+    return `${notes}<div class="summary">${content}</div>`;
+  }
+
   function draftSectionHtml(post) {
-    if (post.state === "analysing" || post.draft.status === "idle" || post.draft.status === "loading") {
-      const label = post.state === "analysing" ? "Reading the post" : "Matching resumes and drafting your email";
+    if (post.draft.status === "idle") {
+      if (post.state === "analysing" || post.state === "detected") return "";
+      return `
+        <section class="block">
+          <p class="hint" style="margin:0">Ready when you are — <b>Generate application</b> picks your best resume and drafts the email in a few seconds.</p>
+        </section>`;
+    }
+    if (post.draft.status === "loading") {
+      const label = "Matching resumes and drafting your email";
       return `
         <section class="block">
           <div class="loading-line"><span class="spin"></span>${label}<span class="dots"></span> <span class="secs"></span></div>
@@ -1044,6 +1126,7 @@ const applyFlowPopup = (() => {
       </section>
 
       <section class="block">
+        ${app?.email?.eligibility && !locked ? `<div class="note" style="margin-bottom:12px">${I.warning(15)}<span><b>Check before sending:</b> ${e(app.email.eligibility)}</span></div>` : ""}
         <label class="label" for="af-to">To</label>
         <input id="af-to" type="email" data-field="to" value="${e(post.fields.to)}" placeholder="recruiter@company.com" ${locked ? "disabled" : ""}>
         ${post.fields.to ? "" : `<div class="hint">No email address in this post — check how they want you to apply.</div>`}
@@ -1067,7 +1150,14 @@ const applyFlowPopup = (() => {
     const s = post.send;
     let main;
 
-    if (!ready) {
+    if (post.draft.status === "idle") {
+      const reading = post.state === "analysing" || post.state === "detected";
+      main = reading
+        ? `<button class="btn primary wide" disabled><span class="spin inverse"></span>Reading the post…</button>`
+        : `<button class="btn primary wide" data-action="generate">${I.sparkle(16)}Generate application</button>`;
+    } else if (post.draft.status === "loading") {
+      main = `<button class="btn primary wide" disabled><span class="spin inverse"></span>Drafting…</button>`;
+    } else if (!ready) {
       main = `<button class="btn primary wide" disabled>${I.send(16)}Send application</button>`;
     } else if (s.status === "sent") {
       main = `
@@ -1132,42 +1222,7 @@ const applyFlowPopup = (() => {
 })();
 
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-
-  if (message.type !== "SHOW_HIRING_POPUP") {
-    return;
-  }
-
-  const postId = message.postId;
-
-  // Use Gemini's result when available.
-  // Otherwise, fall back to our existing local extraction.
-  const aiJob = message.jobData;
-
-  if (aiJob && aiJob.isHiringPost === false) {
-    console.log("ApplyFlow AI: Gemini says this is not a hiring post — hiding it.");
-    applyFlowPopup.removePost(postId);
-  } else if (aiJob) {
-    const localJob = extractJobInformation(message.postText || "");
-    const job = displayJobFromAi(aiJob, localJob);
-    console.log("ApplyFlow AI: Final job information:", job);
-    applyFlowPopup.update(postId, {
-      state: "ai",
-      job,
-      aiJob,
-      applicationId: message.applicationId || null,
-      alreadyApplied: !!message.alreadyApplied,
-      error: null
-    });
-  } else {
-    applyFlowPopup.update(postId, {
-      state: "fallback",
-      error: message.analysisError || null
-    });
-  }
-
-  sendResponse({ success: true });
-});
+// (The AI now reads a post only when the user opens it — see analysePost() above.)
 
 
 
@@ -1338,6 +1393,12 @@ const POPUP_CSS = `
   .details[open] summary svg { transform: rotate(90deg); }
   .details summary::-webkit-details-marker { display: none; }
   .kv { margin: 12px 0 10px; display: grid; gap: 8px; }
+  .summary { margin-top: 2px; }
+  .summary > .link, .details .link { display: inline-block; margin-top: 12px; }
+  .sum-label { font-size: 12px; font-weight: 600; color: var(--muted); margin: 12px 0 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip.solid { border-style: solid; }
+  .reqs { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; color: var(--text-2); }
   .kv-row { display: grid; grid-template-columns: 92px 1fr; gap: 10px; font-size: 13px; }
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; overflow-wrap: anywhere; }

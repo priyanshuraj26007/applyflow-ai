@@ -60,8 +60,8 @@ function renderJob() {
   $("#jobCompany").textContent = [job.company, job.location].filter(Boolean).join(" · ") || "Company not identified";
 
   $("#sourceBadge").innerHTML = app.analysisSource === "gemini"
-    ? `<span class="badge">${AF_ICONS.sparkle(12)}Analysed by Gemini</span>`
-    : `<span class="badge warn">Local extraction (Gemini unavailable)</span>`;
+    ? `<span class="badge">${AF_ICONS.sparkle(12)}Analysed by AI</span>`
+    : `<span class="badge warn">Local extraction (AI unavailable)</span>`;
 
   const rows = [
     ["Recruiter", job.recruiter],
@@ -135,6 +135,11 @@ function renderEmail() {
   $("#attachView").href = resumeId ? `${API_BASE}/api/resumes/${encodeURIComponent(resumeId)}/file` : "#";
   dirty = false;
   $("#saveState").textContent = email.generatedWith ? `Drafted by ${email.generatedWith}` : "";
+  if (email.eligibility && !app.sentMessageId) {
+    banner(`${AF_ICONS.warning(16)}<span><strong>Check before sending:</strong> ${esc(email.eligibility)}</span>`, "warn", "eligibility");
+  } else {
+    clearBanner("eligibility");
+  }
 }
 
 function renderGmail() {
@@ -184,7 +189,7 @@ async function prepare(options = {}) {
   clearBanner("prepare");
   setLoading(
     options.resumeId ? "Rewriting the email for your chosen resume…" : "Matching your resumes and drafting a personalised email…",
-    "Gemini usually takes 10–30 seconds."
+    "This usually takes a few seconds."
   );
   try {
     const data = await api(`/api/applications/${encodeURIComponent(appId)}/prepare`, {

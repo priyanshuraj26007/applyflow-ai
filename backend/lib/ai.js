@@ -1,9 +1,10 @@
 // ==========================================
-// APPLYFLOW AI — GEMINI TASKS
+// APPLYFLOW AI — AI TASKS
 // ==========================================
 // Every prompt treats LinkedIn posts and resumes as UNTRUSTED DATA.
 // Every output is validated/normalised before anything else uses it.
-import { callGeminiJson, GeminiError } from "./gemini.js";
+import { GeminiError } from "./gemini.js";
+import { callAI, callAIJson } from "./ai-router.js";
 
 const S = { type: "STRING" };
 const NS = { type: "STRING", nullable: true };
@@ -39,18 +40,22 @@ const JOB_SCHEMA = {
     jobTitle: NS, company: NS, recruiter: NS, email: NS, experience: NS,
     location: NS, joining: NS, category: NS, skills: ARR,
     applicationInstructions: NS, deadline: NS,
+    experienceLevel: NS, employmentType: NS, requirements: ARR,
     inferredFields: ARR
   },
   required: [
     "isHiringPost", "jobTitle", "company", "recruiter", "email", "experience",
     "location", "joining", "category", "skills", "applicationInstructions",
-    "deadline", "inferredFields"
+    "deadline", "experienceLevel", "employmentType", "requirements", "inferredFields"
   ]
 };
 
+const EXPERIENCE_LEVELS = ["Fresher", "Experienced", "Fresher or experienced"];
+const EMPLOYMENT_TYPES = ["Full-time", "Internship", "Contract", "Part-time"];
+
 export function normaliseJob(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new GeminiError("GEMINI_BAD_OUTPUT", "Gemini returned an unexpected format.", 502);
+    throw new GeminiError("GEMINI_BAD_OUTPUT", "The AI returned an unexpected format.", 502);
   }
   let email = str(raw.email, 200);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) email = null;
@@ -69,12 +74,15 @@ export function normaliseJob(raw) {
     skills: strList(raw.skills, 30, 80),
     applicationInstructions: str(raw.applicationInstructions, 1000),
     deadline: str(raw.deadline, 200),
+    experienceLevel: EXPERIENCE_LEVELS.includes(raw.experienceLevel) ? raw.experienceLevel : null,
+    employmentType: EMPLOYMENT_TYPES.includes(raw.employmentType) ? raw.employmentType : null,
+    requirements: strList(raw.requirements, 8, 160),
     inferredFields: strList(raw.inferredFields, 15, 40)
   };
 }
 
 export async function analyzeJobPost(postText) {
-  const { data, model } = await callGeminiJson("fast", `
+  const { data, model } = await callAIJson("fast", `
 You are a recruitment information extraction assistant.
 Analyse the LinkedIn post below and extract job-related information.
 ${INJECTION_RULE}
@@ -89,6 +97,11 @@ RULES:
 - "skills": only skills explicitly mentioned. Empty array if none.
 - "category": one of ${JOB_CATEGORIES.join(", ")} — inferred from the title/responsibilities.
 - "deadline": application deadline only if stated.
+- "experienceLevel": "Fresher" (0 years / freshers / students / new grads welcome),
+  "Experienced" (needs 1+ years), "Fresher or experienced" (both welcome), or null if unclear.
+- "employmentType": one of ${EMPLOYMENT_TYPES.join(", ")}, or null if not stated.
+- "requirements": up to 6 short key requirements stated in the post that are NOT plain skills
+  (e.g. "B.Tech/MBA", "Immediate joiner", "Must be based in Pune", "2026 graduates"). Empty if none.
 - "inferredFields": names of fields you inferred rather than read explicitly
   (e.g. ["category","company"]).
 
@@ -136,7 +149,7 @@ const RESUME_SCHEMA = {
 
 export function normaliseResumeProfile(raw) {
   if (!raw || typeof raw !== "object") {
-    throw new GeminiError("GEMINI_BAD_OUTPUT", "Gemini returned an unexpected resume format.", 502);
+    throw new GeminiError("GEMINI_BAD_OUTPUT", "The AI returned an unexpected resume format.", 502);
   }
   const years = Number(raw.totalExperienceYears);
   return {
@@ -168,7 +181,7 @@ export function normaliseResumeProfile(raw) {
 }
 
 export async function analyzeResume(resumeText) {
-  const { data, model } = await callGeminiJson("smart", `
+  const { data, model } = await callAIJson("smart", `
 You extract a structured candidate profile from a resume.
 ${INJECTION_RULE}
 
@@ -241,7 +254,7 @@ export async function matchResumes(job, resumes) {
     throw new GeminiError("NO_ANALYSED_RESUMES", "No analysed resumes yet. Upload a resume in the dashboard first.", 400);
   }
 
-  const { data, model } = await callGeminiJson("draft", `
+  const { data, model } = await callAIJson("match", `
 You are a careful career advisor. Score how well EACH resume fits the job below.
 ${INJECTION_RULE}
 ${SCORING_RULES}
@@ -266,7 +279,29 @@ ${fence(JSON.stringify(usable.map(compactProfile)))}
   return { ...normaliseRankings(data, usable), model };
 }
 
-/** Validate Gemini's rankings: only known resume ids, scores 0-100, best first. */
+// Some models occasionally write numbers as words ("thirty", "seventy-two").
+const UNITS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+  "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+
+/** A 0-100 score from a number, "72", "72%" or "seventy-two". */
+export function toScore(value) {
+  let n = typeof value === "number" ? value : NaN;
+  if (typeof value === "string") {
+    const s = value.trim().toLowerCase();
+    const digits = s.match(/-?\d+(\.\d+)?/);
+    if (digits) n = Number(digits[0]);
+    else if (/^(one )?hundred$/.test(s)) n = 100;
+    else {
+      const [tens, unit] = s.split(/[\s-]+/);
+      if (UNITS.includes(tens) && !unit) n = UNITS.indexOf(tens);
+      else if (TENS[tens] != null) n = TENS[tens] + (unit ? Math.max(0, UNITS.indexOf(unit)) : 0);
+    }
+  }
+  return Math.max(0, Math.min(100, Math.round(Number.isFinite(n) ? n : 0)));
+}
+
+/** Validate the AI's rankings: only known resume ids, scores 0-100, best first. */
 export function normaliseRankings(data, usable) {
   const validIds = new Set(usable.map(r => r.id));
   const seen = new Set();
@@ -274,7 +309,7 @@ export function normaliseRankings(data, usable) {
     .filter(r => validIds.has(r?.resumeId) && !seen.has(r.resumeId) && seen.add(r.resumeId))
     .map(r => ({
       resumeId: r.resumeId,
-      score: Math.max(0, Math.min(100, Math.round(Number(r.score) || 0))),
+      score: toScore(r.score),
       reasons: strList(r.reasons, 5),
       missingSkills: strList(r.missingSkills, 10, 80),
       relevantHighlights: strList(r.relevantHighlights, 5)
@@ -282,7 +317,7 @@ export function normaliseRankings(data, usable) {
     .sort((a, b) => b.score - a.score);
 
   if (!rankings.length) {
-    throw new GeminiError("GEMINI_BAD_OUTPUT", "Gemini did not return usable resume rankings.", 502);
+    throw new GeminiError("GEMINI_BAD_OUTPUT", "The AI did not return usable resume rankings.", 502);
   }
 
   // Trust the scores over the free-text recommendation if they disagree.
@@ -299,86 +334,41 @@ Consider role alignment, required experience, explicit skills, and relevant proj
 Do NOT credit skills the resume does not contain. Do not invent qualifications.`;
 
 // ------------------------------------------
-// 4. APPLICATION EMAIL
+// 4. APPLICATION EMAIL — "your skeleton + AI-filled blanks"
 // ------------------------------------------
-// Quality comes from three things:
-//   1. Gemini sees the FULL post and the FULL resume text (not summaries).
-//   2. It plans first ("keyNeeds" → "evidence") and only then writes.
-//   3. It follows the user's own style example (Settings → "Example email I like").
-const EMAIL_SCHEMA = {
-  type: "OBJECT",
-  properties: { subject: S, body: S },
-  required: ["subject", "body"],
-  propertyOrdering: ["subject", "body"]
-};
+// Blind tests against the user's favourite ChatGPT emails showed two things:
+//   - Facts matter most: the AI needs the user's own context ("About me", imported
+//     from their AI assistant), today's date, and strict rules against inventing.
+//   - The voice the user likes is consistent: ~70% of their favourite emails is the
+//     same wording. So the AI keeps the user's SKELETON and only fills the [blanks].
+// The sign-off is added by code (never by the AI), so it is always exactly right.
 
-// Planning fields are generated BEFORE the email text, so the email is built on them.
-const PLAN_PROPS = {
-  keyNeeds: ARR,   // the 2-3 things this employer cares about most
-  evidence: ARR    // the candidate's strongest TRUE evidence for each need
-};
+export const DEFAULT_EMAIL_SKELETON = `Hi [first name of the person hiring — or "Team <Company>" — or "Team"],
 
-const EMAIL_WITH_PLAN_SCHEMA = {
-  type: "OBJECT",
-  properties: { ...PLAN_PROPS, subject: S, body: S },
-  required: ["keyNeeds", "evidence", "subject", "body"],
-  propertyOrdering: ["keyNeeds", "evidence", "subject", "body"]
-};
+I came across your post regarding the [role] opportunity[ at <Company>, if known] and wanted to reach out to express my interest.
+
+I am a [current year of study, degree and college — or current role], [with a growing interest in / interested in] [2-3 interests that genuinely connect to this role].
+
+I have been building my skills in [the 3-6 skills/tools from the facts that matter most for this post][, and have worked on projects including:]
+- [Project name]: [one plain sentence on what I did]
+- [Project name, only if a second project is relevant]: [one plain sentence on what I did]
+[One sentence on the internship/work experience most relevant to this post and what it gave me exposure to.]
+
+What particularly interests me about [company or this role] is [the specific work described in the post]. [One sentence on why, in my own words.]
+
+[ONLY if the post requires something the facts clearly don't show: I may not have experience with every tool mentioned, but I am a fast learner, proactive, and comfortable taking ownership of unfamiliar challenges.]
+
+I am [2-3 traits from the facts, e.g. a quick learner, detail-oriented, someone who takes ownership] and eager to [contribute to the team / the specific area].
+
+I have attached my resume for your consideration and would appreciate the opportunity to discuss the role.`;
+
+const todayText = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
 /** "Warm regards," + name | phone + LinkedIn — or the user's own signature. */
 export function signatureBlock(settings, senderName) {
   if (settings.signature?.trim()) return settings.signature.trim();
   const nameLine = [senderName, settings.phone].filter(Boolean).join(" | ");
   return ["Warm regards,", nameLine, settings.linkedinUrl].filter(Boolean).join("\n");
-}
-
-// Shared writing rules (used by generateEmail and draftApplication).
-function emailRules(settings, senderName) {
-  const style = settings.styleExample?.trim();
-  return `
-WHAT MAKES A GREAT EMAIL HERE:
-- It reads like a thoughtful person wrote it for THIS opening — not a generic template.
-- It shows the candidate read the post: refer to what the team does or is looking for
-  (from the full post) and connect it to the candidate's most relevant REAL experience.
-- Plan first. "keyNeeds": the 2-3 things this employer cares about most, taken from the post.
-  "evidence": for each need, the strongest TRUE evidence from the resume — or, if there is
-  no direct match, an honest transferable strength (prefix it with "transferable:").
-  Then write the email built on that plan.
-- Lead with strengths. Leave out weak or irrelevant details (e.g. an average GPA,
-  unrelated coursework) unless the post asks for them.
-- For a stretch role, be honest and positive: stress transferable skills and genuine
-  interest. Never claim experience the candidate does not have.
-- NEVER invent facts, numbers, employers, tools or skills. Use only the resume and the
-  candidate's additional facts.
-- If the post gives application instructions (a subject format, or details to include such
-  as notice period, CTC, availability), follow them using only known facts; skip unknowns.
-- NEVER claim the candidate has already done something outside this email — e.g. "I have
-  filled out the form", "I have applied on the portal", "as discussed". If the post asks for
-  an extra step (a form, a portal), do not mention having done it.
-
-FORMAT:
-- Plain text. Paragraphs separated by ONE blank line. No markdown, no emojis, no bullets.
-- About 150-230 words before the sign-off.
-- Greeting: "Dear <recruiter FIRST name only>," (e.g. "Dear Yogya," — not the full name) if a
-  recruiter name is known, otherwise "Dear Hiring Team,".
-- Say that the resume is attached.
-- End with EXACTLY this sign-off block, keeping its line breaks:
-${signatureBlock(settings, senderName)}
-- Subject: clear and professional, e.g. "Application for <Role> – <Candidate name>".
-  If the post asks for a specific subject format, use it exactly.
-- Tone: ${settings.emailTone || "professional, warm and confident"}.
-${style ? `
-STYLE EXAMPLE — an email the candidate likes. Match its tone, formality, paragraph structure,
-length and way of phrasing things. Do NOT copy its facts, company or role — it was written for
-a different job. The new email must be specific to THIS post:
-"""
-${fence(style).slice(0, 4000)}
-"""` : `
-STRUCTURE: greeting → where they saw the post and their interest in the role → who they are
-(degree, college, year) → one or two paragraphs connecting their most relevant experience to
-this post's needs → why this role/team appeals to them → resume attached and a request to
-discuss → short closing line → sign-off.`}
-${settings.extraInstructions ? `\nCANDIDATE'S PERSONAL WRITING PREFERENCES (follow these):\n${fence(settings.extraInstructions).slice(0, 1000)}` : ""}`;
 }
 
 // Drop LinkedIn interface noise ("X likes this", "• 2nd", "3h • Edited") and cap the length.
@@ -388,22 +378,6 @@ function cleanPostForPrompt(postText) {
     .filter(line => !/(likes this|commented on this|reposted this|^•\s*(1st|2nd|3rd\+?)$|^\d+[hdwmo]+\s*•|^Promoted$)/i.test(line.trim()))
     .join("\n")
     .slice(0, 6000);
-}
-
-function jobBlock(job, postText) {
-  return `EXTRACTED JOB DETAILS:
-"""
-${fence(JSON.stringify({
-  jobTitle: job.jobTitle, company: job.company, recruiter: job.recruiter,
-  experience: job.experience, location: job.location, joining: job.joining,
-  skills: job.skills, applicationInstructions: job.applicationInstructions
-}))}
-"""
-${postText ? `
-FULL LINKEDIN POST:
-"""
-${fence(cleanPostForPrompt(postText))}
-"""` : ""}`;
 }
 
 // Full resume text (what a human would read), with the structured profile as a fallback.
@@ -417,100 +391,159 @@ function resumeForPrompt(resume) {
   };
 }
 
-function candidateNotesBlock(settings) {
-  return settings.candidateNotes ? `
-ADDITIONAL FACTS PROVIDED BY THE CANDIDATE (true, may be used — e.g. notice period, current location):
-"""
-${fence(settings.candidateNotes).slice(0, 1000)}
-"""` : "";
+// Slim view of the attached resume when the "About me" profile already has the details.
+function resumeOutline(resume) {
+  const p = resume?.profile || {};
+  return {
+    education: p.education,
+    skills: p.skills, tools: p.tools,
+    experience: (p.experience || []).map(e => [e.role, e.organisation, e.duration].filter(Boolean).join(" — ")),
+    projects: (p.projects || []).map(pr => pr.name)
+  };
 }
 
-function cleanEmail(data) {
-  const subject = str(data?.subject, 200)?.replace(/[\r\n]+/g, " ");
-  const body = str(data?.body, 5000)?.replace(/\n{3,}/g, "\n\n");
-  if (!subject || !body) {
-    throw new GeminiError("GEMINI_BAD_OUTPUT", "Gemini returned an empty email.", 502);
+const SIGNOFF_LINE = /^(warm |best |kind )?regards[,.!]?(\s+\S.*)?$|^(sincerely|thanks|thank you|cheers|yours (sincerely|truly))[,.!]?$/i;
+
+/**
+ * Parse the writer's plain-text answer:
+ *   Subject: …  /  <email>  /  ELIGIBILITY: … | none
+ * Removes markdown and any sign-off the AI added anyway.
+ */
+export function parseEmailOutput(text) {
+  let raw = String(text || "").replace(/\r/g, "");
+  const subject = (raw.match(/^\s*\**subject\**\s*:\s*(.+)$/im) || [])[1]?.replace(/\*+/g, "").trim() || null;
+  const eligibilityRaw = (raw.match(/^\s*\**eligibility\**\s*:\s*(.+)$/im) || [])[1]?.replace(/\*+/g, "").trim() || "";
+  const eligibility = /^(none|n\/a|no issues?)\.?$/i.test(eligibilityRaw) || !eligibilityRaw ? null : eligibilityRaw.slice(0, 300);
+
+  raw = raw
+    .replace(/^\s*\**subject\**\s*:.*$/im, "")
+    .replace(/^\s*\**eligibility\**\s*:.*$/im, "")
+    .replace(/^\s*(email|body)\s*:\s*$/im, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")          // **bold**
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/^#+\s*/gm, "")                  // markdown headings
+    .replace(/^\s*[•*]\s+/gm, "- ");          // bullets → "- "
+
+  const lines = raw.split("\n").map(l => l.replace(/\s+$/, ""));
+  // Cut a sign-off near the end ("Best regards," / "Regards, Name" + name lines).
+  for (let i = Math.max(0, lines.length - 6); i < lines.length; i++) {
+    if (SIGNOFF_LINE.test(lines[i].trim())) { lines.length = i; break; }
   }
-  return { subject, body, plan: { keyNeeds: strList(data?.keyNeeds, 5), evidence: strList(data?.evidence, 5) } };
+  const body = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return { subject, body, eligibility };
 }
 
-/** Write an email for one specific resume (used when the user switches resume or clicks Rewrite). */
-export async function generateEmail({ job, postText, resume, settings }) {
-  const senderName = settings.senderName || resume.profile?.name || "";
+/**
+ * Write the application email by filling the user's skeleton.
+ * profileText = the user's "About me" (compact) or null.
+ * Returns { subject, body (with sign-off), eligibility, model }.
+ */
+export async function writeEmail({ job, postText, resume, settings, profileText }) {
+  const senderName = settings.senderName || resume?.profile?.name || "";
+  const skeleton = settings.emailSkeleton?.trim() || DEFAULT_EMAIL_SKELETON;
 
-  const { data, model } = await callGeminiJson("draft", `
-You are an expert career coach writing a job application email on behalf of the candidate.
-${INJECTION_RULE}
-${emailRules(settings, senderName)}
-
-${jobBlock(job, postText)}
-
-CANDIDATE NAME: ${fence(senderName)}
-
-CANDIDATE RESUME:
+  const facts = profileText
+    ? `CAREER PROFILE (written by the candidate's own AI assistant — the main source of truth):
+"""
+${fence(profileText).slice(0, 16000)}
+"""
+RESUME BEING ATTACHED — outline (keep the email consistent with it; if it disagrees with the profile on a fact, leave that fact out):
+"""
+${fence(JSON.stringify(resumeOutline(resume)))}
+"""`
+    : `CANDIDATE RESUME (the only source of facts):
 """
 ${fence(JSON.stringify(resumeForPrompt(resume)))}
-"""
-${candidateNotesBlock(settings)}`, EMAIL_WITH_PLAN_SCHEMA);
+"""`;
 
-  return { ...cleanEmail(data), model };
+  const { text, model } = await callAI("draft", `
+Write a job application email for ${senderName || "the candidate"} by FILLING IN THE SKELETON below. Today is ${todayText()}.
+${INJECTION_RULE}
+
+THE SKELETON is the candidate's own email style — it overrides any greeting, structure or length preferences in the profile:
+- Keep its fixed wording (only small grammar changes). Replace every [bracketed instruction] with content for THIS post.
+- Drop optional [lines] that don't apply. Don't add new paragraphs. No markdown, no bold, no emojis.
+  Project lines start with "- ".
+
+FACT RULES (most important):
+- Use ONLY facts from the profile/resume below${settings.candidateNotes ? " and the candidate's extra facts" : ""}. Never invent experience, tools,
+  numbers, names, results or exams.
+- Obey every "never claim" / "do not" note. Facts marked "(?)" must not be stated as certain.
+- Never say the candidate lacks something the facts show. Use the "may not have experience" line only if the post
+  REQUIRES something the facts clearly don't show.
+- ELIGIBILITY: check EVERY requirement in the post (see "requirements" and "experience" below) against the facts —
+  e.g. exams cleared, years of experience, degree, graduation year, location. Report any the facts don't meet.
+- Keep project work and internship work separate. Describe a project with the profile's "what I did / my contribution"
+  wording first (plainer is better), never bigger than the facts. Use ONE job title per role (no "A / B").
+- Year of study: if not stated, work it out from the graduation year and today's date.
+- Greeting: the first name of the person who posted or is clearly hiring (not people merely tagged), else
+  "Team <Company>", else "Team".
+- Pick what matters for THIS post: the skills it asks for that the facts confirm, the 1-2 most relevant projects,
+  and the most relevant experience. "What particularly interests me" must name the actual work in the post.
+- Do NOT write a sign-off or the candidate's name at the end — it is added automatically.
+${settings.extraInstructions ? `- Candidate's writing preferences: ${fence(settings.extraInstructions).slice(0, 600)}\n` : ""}
+OUTPUT (plain text, exactly this shape):
+Subject: <e.g. "Application for <Role> – ${senderName || "<Name>"}" — or the subject format the post asks for>
+
+<the filled-in email>
+
+ELIGIBILITY: <one short line if the post has a hard requirement the facts clearly don't meet (exams cleared, years of
+experience, degree, location); otherwise "none">
+
+SKELETON:
+"""
+${fence(skeleton)}
+"""
+
+KNOWN JOB DETAILS:
+"""
+${fence(JSON.stringify({ role: job?.jobTitle, company: job?.company, personHiring: job?.recruiter, howToApply: job?.applicationInstructions, experience: job?.experience, requirements: job?.requirements, skills: job?.skills }))}
+"""
+
+LINKEDIN POST:
+"""
+${fence(cleanPostForPrompt(postText))}
+"""
+
+${facts}
+${settings.candidateNotes ? `
+CANDIDATE'S EXTRA FACTS (true, may be used):
+"""
+${fence(settings.candidateNotes).slice(0, 1000)}
+"""` : ""}`);
+
+  const parsed = parseEmailOutput(text);
+  if (!parsed.body || parsed.body.split(/\s+/).length < 40) {
+    throw new GeminiError("GEMINI_BAD_OUTPUT", "The AI returned an incomplete email.", 502);
+  }
+  const subject = (parsed.subject || `Application for ${job?.jobTitle || "the role"}${senderName ? ` – ${senderName}` : ""}`)
+    .replace(/[\r\n]+/g, " ").slice(0, 200);
+  return {
+    subject,
+    body: `${parsed.body}\n\n${signatureBlock(settings, senderName)}`.slice(0, 6000),
+    eligibility: parsed.eligibility,
+    model
+  };
 }
 
 // ------------------------------------------
-// 5. ONE-SHOT DRAFT: match all resumes + write the email in ONE Gemini call
+// 5. DRAFT = resume match + email
 // ------------------------------------------
-// Halves the wait compared with matchResumes() followed by generateEmail().
-const DRAFT_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    rankings: MATCH_SCHEMA.properties.rankings,
-    emailResumeId: S,
-    ...PLAN_PROPS,
-    email: EMAIL_SCHEMA
-  },
-  required: ["rankings", "emailResumeId", "keyNeeds", "evidence", "email"],
-  propertyOrdering: ["rankings", "emailResumeId", "keyNeeds", "evidence", "email"]
-};
-
-export async function draftApplication({ job, postText, resumes, settings, preferredResumeId }) {
+// When we already know which resume the email is for (the user's choice, or there's
+// only one resume) the match and the email run IN PARALLEL; otherwise match first.
+export async function draftApplication({ job, postText, resumes, settings, preferredResumeId, profileText }) {
   const usable = resumes.filter(r => r.profile);
   if (!usable.length) {
     throw new GeminiError("NO_ANALYSED_RESUMES", "No analysed resumes yet. Upload a resume in the dashboard first.", 400);
   }
-  const preferred = usable.find(r => r.id === preferredResumeId);
-  const senderName = settings.senderName || usable[0].profile?.name || "";
+  const knownId = usable.find(r => r.id === preferredResumeId)?.id || (usable.length === 1 ? usable[0].id : null);
+  const write = (id) => writeEmail({ job, postText, resume: usable.find(r => r.id === id), settings, profileText });
 
-  const { data, model } = await callGeminiJson("draft", `
-You are an expert career coach. Do TWO things for the job below.
-${INJECTION_RULE}
+  const emailPromise = knownId ? write(knownId) : null;
+  emailPromise?.catch(() => {}); // handled below — avoid an "unhandled rejection" if matching fails first
+  const match = await matchResumes(job, usable);
+  const emailResumeId = knownId || match.recommendedResumeId;
+  const email = await (emailPromise || write(emailResumeId));
 
-TASK 1 — Score how well EACH resume fits the job.
-${SCORING_RULES}
-For each resume: "reasons" (2-3 short reasons citing resume evidence), "missingSkills"
-(job requirements not evidenced in that resume), "relevantHighlights" (2-3 most relevant
-experiences/projects). One ranking per resume, using the exact resumeId values given.
-
-TASK 2 — Write the application email from the candidate to the recruiter, based on
-${preferred ? `the resume with resumeId "${preferred.id}" (the candidate chose it).` : "the HIGHEST-scoring resume from Task 1."}
-Set "emailResumeId" to the resumeId the email is based on. Use only facts from that resume.
-${emailRules(settings, senderName)}
-
-${jobBlock(job, postText)}
-
-CANDIDATE NAME: ${fence(senderName)}
-
-RESUMES:
-"""
-${fence(JSON.stringify(usable.map(resumeForPrompt)))}
-"""
-${candidateNotesBlock(settings)}`, DRAFT_SCHEMA);
-
-  const { rankings, recommendedResumeId } = normaliseRankings(data, usable);
-  const email = cleanEmail({ ...data?.email, keyNeeds: data?.keyNeeds, evidence: data?.evidence });
-
-  // Which resume the email was written for: the user's choice, else what Gemini says it used.
-  const emailResumeId = preferred?.id ||
-    (usable.some(r => r.id === data?.emailResumeId) ? data.emailResumeId : recommendedResumeId);
-
-  return { rankings, recommendedResumeId, emailResumeId, ...email, model };
+  return { rankings: match.rankings, recommendedResumeId: match.recommendedResumeId, emailResumeId, ...email };
 }

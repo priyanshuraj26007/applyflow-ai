@@ -96,7 +96,7 @@
           </div>
         </form>
         <p class="muted small" style="margin:10px 0 0">
-          Gemini reads each resume once and saves a profile (skills, experience, projects). Files stay on your computer in <code>backend/data</code>.
+          The AI reads each resume once and saves a profile (skills, experience, projects). Files stay on your computer in <code>backend/data</code>.
         </p>
       </div>
 
@@ -117,10 +117,10 @@
           </div>
 
           <div class="card">
-            <h2><span data-icon="sparkle"></span>Gemini</h2>
+            <h2><span data-icon="sparkle"></span>AI models</h2>
             <dl class="kv" id="geminiInfo"></dl>
             <div class="row" style="margin-top:12px">
-              <button id="testGemini" class="btn small">Test Gemini connection</button>
+              <button id="testGemini" class="btn small">Test AI connection</button>
               <span id="testGeminiResult" class="small muted"></span>
             </div>
           </div>
@@ -130,6 +130,20 @@
           <h2><span data-icon="user"></span>Your details &amp; writing style</h2>
           <p class="muted small" style="margin-top:-6px">Used when drafting emails. Leave blank to use the name from your resume.</p>
           <form id="settingsForm">
+            <div class="about-me">
+              <label for="sAbout">About me — from your own AI</label>
+              <p class="muted small" style="margin:0 0 8px">ChatGPT, Claude or Gemini already know you from months of chats. Bring that context here so every email sounds like you:</p>
+              <ol class="steps small">
+                <li><button type="button" id="copyAboutPrompt" class="btn small">Copy the prompt</button> and paste it into your AI.</li>
+                <li>Paste its answer below, check it, and press <b>Save settings</b>. It stays on this computer.</li>
+              </ol>
+              <textarea id="sAbout" name="aboutMe" rows="8" maxlength="60000" placeholder="Paste the career profile your AI wrote about you…"></textarea>
+              <div class="row" style="margin-top:6px"><span id="aboutStatus" class="small muted"></span></div>
+              <details id="aboutCompactBox" class="hidden" style="margin-top:6px">
+                <summary class="small">What ApplyFlow uses (condensed fact sheet)</summary>
+                <pre id="aboutCompact" class="compact-pre"></pre>
+              </details>
+            </div>
             <div class="two">
               <div><label for="sName">Your name</label><input id="sName" name="senderName" type="text" maxlength="120"></div>
               <div><label for="sPhone">Phone</label><input id="sPhone" name="phone" type="text" maxlength="40"></div>
@@ -138,8 +152,12 @@
             <input id="sLinkedin" name="linkedinUrl" type="url" maxlength="300" placeholder="https://www.linkedin.com/in/…">
             <label for="sSignature">Email signature (optional — overrides the three fields above)</label>
             <textarea id="sSignature" name="signature" rows="3" maxlength="600" placeholder="Leave blank for:&#10;Warm regards,&#10;Your Name | Phone&#10;LinkedIn URL"></textarea>
-            <label for="sStyle">Example email I like</label>
-            <textarea id="sStyle" name="styleExample" rows="9" maxlength="4000" placeholder="Paste an application email you're happy with (e.g. one ChatGPT wrote). Every draft will follow its tone, length and structure — but with facts from your resume and the new post."></textarea>
+            <div class="label-row">
+              <label for="sSkeleton">Email skeleton</label>
+              <button type="button" id="resetSkeleton" class="btn small">Reset to default</button>
+            </div>
+            <p class="muted small" style="margin:0 0 6px">Your own wording. The AI keeps it and only fills the <code>[brackets]</code> for each job. The sign-off below is added automatically.</p>
+            <textarea id="sSkeleton" name="emailSkeleton" rows="14" maxlength="4000"></textarea>
             <label for="sTone">Tone</label>
             <input id="sTone" name="emailTone" type="text" maxlength="120" placeholder="professional, warm and confident">
             <label for="sPrefs">Writing preferences</label>

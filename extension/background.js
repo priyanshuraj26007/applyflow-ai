@@ -2,13 +2,13 @@
 // APPLYFLOW AI — BACKGROUND SERVICE WORKER
 // ==========================================
 // Messages handled:
-//   HIRING_POST_DETECTED  (content.js)  → analyse with backend, reply via SHOW_HIRING_POPUP
+//   ANALYZE_POST          (content.js)  → user opened a detected post: AI job summary
 //   OPEN_REVIEW           (content.js)  → make sure an application record exists, open review page
 //   ANALYZE_TEXT          (popup.js)    → manual analysis of selected text
 console.log("ApplyFlow AI: Background service worker started!");
 
 const API = "http://127.0.0.1:3000";
-const ANALYZE_TIMEOUT_MS = 65000; // backend may try up to 3 Gemini models
+const ANALYZE_TIMEOUT_MS = 65000; // backend may try several AI models
 const CACHE_LIMIT = 200;
 
 // Posts being analysed right now (prevents duplicate requests for the same post).
@@ -30,7 +30,7 @@ async function api(path, { method = "GET", body, timeout = 20000 } = {}) {
     const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
     throw Object.assign(
       new Error(timedOut
-        ? "Gemini is taking too long right now."
+        ? "The AI is taking too long right now."
         : "ApplyFlow backend is not running. Start it with: npm.cmd start (in the backend folder)."),
       { code: timedOut ? "TIMEOUT" : "BACKEND_OFFLINE" }
     );
@@ -134,51 +134,19 @@ async function analysePost({ postKey, postText, sourceUrl }) {
   }
 }
 
-// Deliver a message to the LinkedIn tab; ignore it if the tab was closed/navigated.
-function sendToTab(tabId, message) {
-  chrome.tabs.sendMessage(tabId, message, () => {
-    if (chrome.runtime.lastError) {
-      console.warn("ApplyFlow AI: tab no longer available:", chrome.runtime.lastError.message);
-    }
-  });
-}
-
 // ------------------------------------------
 // Message router
 // ------------------------------------------
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
-  if (message.type === "HIRING_POST_DETECTED") {
-    const tabId = sender.tab?.id;
-    if (tabId === undefined) {
-      sendResponse({ success: false });
-      return;
-    }
-    sendResponse({ success: true, accepted: true }); // content.js already shows "Analysing…"
-
-    (async () => {
-      try {
-        console.log("ApplyFlow AI: Sending post to Gemini...");
-        const result = await analysePost(message);
-        console.log("ApplyFlow AI: Gemini analysis successful!", result.jobData);
-        sendToTab(tabId, {
-          type: "SHOW_HIRING_POPUP",
-          postId: message.postId,
-          postText: message.postText,
-          ...result
-        });
-      } catch (error) {
-        console.warn("ApplyFlow AI analysis failed:", error.code, error.message);
-        sendToTab(tabId, {
-          type: "SHOW_HIRING_POPUP",
-          postId: message.postId,
-          postText: message.postText,
-          analysisError: error.message,
-          errorCode: error.code
-        });
-      }
-    })();
-    return; // already responded
+  // The user opened a detected post → read it with the AI (job summary only).
+  // Posts that are only scrolled past never reach the AI, which saves quota.
+  if (message.type === "ANALYZE_POST") {
+    return respond(sendResponse, async () => {
+      console.log("ApplyFlow AI: Reading post with the AI...");
+      const result = await analysePost({ postKey: message.postId, postText: message.postText, sourceUrl: message.sourceUrl });
+      return result;
+    });
   }
 
   // Opens the full Review page in a new tab (optional "Open full page ↗" link).
