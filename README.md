@@ -1,0 +1,178 @@
+<p align="center">
+  <img src="extension/icons/icon128.png" width="96" alt="ApplyFlow AI icon">
+</p>
+
+<h1 align="center">ApplyFlow AI</h1>
+
+<p align="center">
+  <b>Turn LinkedIn hiring posts into polished, personalised job applications in seconds.</b><br>
+  Chrome extension · Node.js · Google Gemini · Gmail API
+</p>
+
+---
+
+Many good jobs on LinkedIn are posted as ordinary feed posts: *"We're hiring, send your resume
+to …"*. Applying to each one means copying details, choosing a resume, writing an email and
+attaching a PDF, which takes 10–15 minutes every time.
+
+**ApplyFlow AI does it in about 4 seconds, and you stay in control.**
+
+- 🔍 **Detects hiring posts** automatically while you scroll your feed
+- 🧠 **Extracts the job details** (role, company, recruiter, contact email, experience) with Gemini
+- 📄 **Picks your best-matching resume** from your library, with a match score
+- ✍️ **Drafts a personalised email** in *your* writing style
+- 📤 **Sends from your own Gmail** with the PDF attached, but only after you click **Send → Confirm**
+- 📊 **Tracks every application** and warns you before you apply twice
+
+> 📘 Read the **[Product Requirements Document (PRD.md)](PRD.md)** for the full story: the problem,
+> goals, requirements, architecture and the decisions behind it.
+
+## How it works
+
+```
+LinkedIn feed ─▶ content.js (detect post → "Hiring post detected" card)
+             ─▶ background.js ─▶ backend /api/analyze-job ─▶ Gemini (job details)
+Click the card ─▶ floating window on LinkedIn ─▶ /prepare ─▶ ONE Gemini call (resume match + email, ~4s)
+Send → Confirm ─▶ /send ─▶ Gmail API (email + PDF resume attached)
+```
+Everything happens on the LinkedIn page. "↗" in the window opens the full Review page if you want more detail.
+
+| Layer | Tech |
+|---|---|
+| Browser | Chrome Extension, Manifest V3 (vanilla JS/CSS, Inter font) |
+| Backend | Node.js, Express 5, Multer, pdf-parse |
+| AI | Google Gemini (`@google/genai`) with model tiers, automatic fallback and request racing |
+| Email | Gmail API, OAuth 2.0 + PKCE, `gmail.send` scope only |
+| Storage | Local JSON files in `backend/data/` (never committed) |
+
+### Highlights
+- **Fast:** match + email in one Gemini call cut draft time from **21.6 s to 3.9 s**.
+- **Resilient:** if a model is overloaded, rate-limited or slow, the next one takes over automatically. A slow model is "raced" against a backup after 5 s.
+- **Private:** API keys, resumes and your Gmail token stay on your computer. The backend only listens on `127.0.0.1` and refuses requests from websites.
+- **Safe:** LinkedIn posts are treated as untrusted input (prompt-injection defence + output validation).
+
+---
+
+## 1. Daily use
+
+**Start the backend** (keep this window open while you use LinkedIn):
+```powershell
+cd backend
+npm.cmd start
+```
+You should see `ApplyFlow AI backend running at http://127.0.0.1:3000`.
+
+Then just browse your LinkedIn feed:
+1. A **"Hiring post detected"** card appears bottom-right → click it.
+2. The side panel shows the best resume (with match score) and the drafted email — edit anything.
+3. **Send application** → **Confirm** (the button changes; nothing is sent until you confirm).
+
+Toolbar icon → **Open Dashboard** for: applications history, resume library, settings.
+
+## 2. First-time setup
+
+### a) Backend
+```powershell
+cd backend
+npm.cmd install
+```
+Copy `backend/.env.example` to `backend/.env` and fill it in:
+```
+GEMINI_API_KEY=your-key-from-aistudio.google.com
+PORT=3000
+# Added in step (c):
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+```
+
+### b) Chrome extension
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. **Load unpacked** → choose the `extension` folder.
+3. After any code change: click the reload ↻ icon on the ApplyFlow card, then refresh LinkedIn.
+
+### c) Gmail (one-time, ~10 minutes)
+ApplyFlow asks Google only for permission to **send** email. It cannot read your inbox and never sees your password.
+
+1. Go to <https://console.cloud.google.com/> → project dropdown → **New project** → name it `ApplyFlow AI` → Create.
+2. **APIs & Services → Library** → search **Gmail API** → **Enable**.
+3. **APIs & Services → OAuth consent screen** (may be called "Google Auth Platform"):
+   - User type **External** → app name `ApplyFlow AI`, your email as support + developer contact.
+   - **Audience / Test users** → **Add users** → add the Gmail address you will send from.
+   - Leave the app in **Testing** mode (fine for personal use).
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
+   - Application type: **Desktop app** → name `ApplyFlow Desktop` → Create.
+   - Copy the **Client ID** and **Client secret**.
+5. Paste them into `backend/.env`:
+   ```
+   GOOGLE_CLIENT_ID=1234567890-abc...apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=GOCSPX-...
+   ```
+6. Restart the backend (Ctrl+C, then `npm.cmd start`).
+7. Dashboard → **Settings** → **Connect Gmail** → choose your account.
+   Google will warn *"Google hasn't verified this app"* — that's expected for your own Testing app:
+   click **Continue**, and make sure the **Send email on your behalf** box is ticked.
+
+> **Note:** In Testing mode Google expires the connection after **7 days**. When sending says
+> "Gmail access expired", just click **Connect Gmail** again.
+
+---
+
+## 3. Project structure
+```
+backend/
+  server.js            API routes + security (origin/host checks, rate limit)
+  lib/gemini.js        model tiers, automatic fallback, timeouts, error codes
+  lib/ai.js            Gemini prompts + output validation (job, resume, match, email)
+  lib/resumes.js       PDF upload/validation/text extraction, resume library
+  lib/applications.js  application tracking + duplicate detection
+  lib/gmail.js         OAuth 2.0 (PKCE) + email builder + sending
+  lib/settings.js      your name/signature/writing preferences
+  lib/store.js         safe JSON storage
+  data/                YOUR DATA (resumes, applications, Gmail token) — never commit/share
+  tests/               npm.cmd test
+extension/
+  manifest.json        Manifest V3
+  content.js           LinkedIn detection + floating ApplyFlow window
+  background.js        talks to the backend, caching, timeouts
+  review.html/js/css   Review & Apply page
+  dashboard.html/js/css Applications · Resumes · Settings
+  popup.html/js/css    toolbar popup (status + manual import)
+  common.js/css        shared helpers & styles
+```
+
+## 4. Configuration (`backend/.env`)
+| Variable | Purpose |
+|---|---|
+| `GEMINI_API_KEY` | Required. Google AI Studio key. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Gmail sending (see 2c). |
+| `GEMINI_MODELS_FAST` | Optional. Comma list for job analysis, tried in order. Default `gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.5-flash` |
+| `GEMINI_MODELS_SMART` | Optional. Comma list for one-time resume analysis. Default `gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
+| `GEMINI_MODELS_DRAFT` | Optional. Comma list for match + email drafting (fastest first). Default `gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.5-flash` |
+| `GEMINI_DRAFT_TIMEOUT_MS` | Optional. Per-model timeout while drafting, default 12000. |
+| `GEMINI_HEDGE_MS` | Optional. If a model hasn't answered after this many ms, the next model is asked in parallel and the first answer wins (post reading + drafting only). Default 5000. |
+| `GEMINI_TIMEOUT_MS` | Optional. Per-model timeout, default 20000. |
+| `ALLOWED_EXTENSION_ID` | Optional hardening: only your extension (ID from chrome://extensions) may call the API. |
+
+## 5. Troubleshooting
+| Problem | Fix |
+|---|---|
+| Popup says *"AI analysis unavailable"* | Look at the backend window. `GEMINI_OVERLOADED 503` / `TIMEOUT` = Google is busy; the backend already tried backups. Retry later or add models to `GEMINI_MODELS_FAST`. |
+| *"ApplyFlow backend is not running"* | Start it with `npm.cmd start` in `backend`. |
+| `Port 3000 is already in use` | An old backend is still running. Find it: `netstat -ano \| findstr :3000` → note the last number (PID) → `Stop-Process -Id <PID>`. |
+| No popup on LinkedIn | Reload the extension, then refresh LinkedIn. Open DevTools (F12) → Console and look for `ApplyFlow AI:` lines. |
+| *"ApplyFlow AI was updated. Refresh this LinkedIn page."* | Exactly that — the extension was reloaded while LinkedIn was open. |
+| Resume "Analysis failed" | Scanned/image PDFs have no text — export a text-based PDF. Or click **Re-analyse** if Gemini was busy. |
+| *"Gmail access expired"* | Dashboard → Settings → Connect Gmail again (7-day limit in Testing mode). |
+| `npm` blocked in PowerShell | Use `npm.cmd` instead of `npm`. |
+
+## 6. Security & privacy
+- API keys live only in `backend/.env` — never in the extension.
+- The backend listens on `127.0.0.1` only and refuses requests from websites (only the extension may call it).
+- Resumes, applications and the Gmail token are stored only on this computer in `backend/data/`.
+- LinkedIn posts and resumes are treated as untrusted text; Gemini is told to ignore instructions inside them and all AI output is validated.
+- Nothing is ever emailed without you clicking **Send Application** and confirming.
+
+## 7. Before publishing to the Chrome Web Store (future)
+This version is a **personal local tool**. A public release needs a hosted backend with user
+accounts, per-user data isolation, rate limiting and its own Gemini billing — never ship a shared API
+key inside the extension. Gmail's `gmail.send` scope also requires Google's app verification.

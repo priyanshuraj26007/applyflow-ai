@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApplyFlow</title>
+  <link rel="stylesheet" href="common.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+  <main class="popup">
+
+    <header class="p-header">
+      <span id="logo"></span>
+      <div class="p-title">
+        <h1>ApplyFlow</h1>
+        <p>Watching LinkedIn for hiring posts</p>
+      </div>
+      <span id="liveBadge" class="badge"><span class="dot"></span><span id="liveText">Checking</span></span>
+    </header>
+
+    <div id="offline" class="banner danger hidden small">
+      <span>Backend isn't running. In the <b>backend</b> folder run <code>npm.cmd start</code>.</span>
+    </div>
+
+    <div class="list">
+      <div class="list-row"><span class="k">Gmail</span><span class="v" id="stGmail">—</span></div>
+      <div class="list-row"><span class="k">Resumes</span><span class="v" id="stResumes">—</span></div>
+      <div class="list-row"><span class="k">Applications</span><span class="v" id="stApps">—</span></div>
+    </div>
+
+    <button id="openDashboard" class="btn primary big wide">Open Dashboard</button>
+
+    <details id="manual" class="manual">
+      <summary>
+        <span id="docIcon"></span>
+        <span class="grow">Analyse selected text</span>
+        <span id="chevIcon" class="chev"></span>
+      </summary>
+      <div class="manual-body">
+        <p class="muted small">Select a job post on any page and import it — or paste the text.</p>
+        <button id="readPost" class="btn wide">Import selected text</button>
+        <label for="jobDescription">Job post</label>
+        <textarea id="jobDescription" placeholder="The job post will appear here…"></textarea>
+        <button id="analyzePost" class="btn primary wide">Analyse with Gemini</button>
+
+        <div id="extractedInfo" class="result hidden">
+          <h2 id="resTitle"></h2>
+          <dl class="kv small" id="resDetails"></dl>
+          <button id="reviewBtn" class="btn primary wide">Review &amp; apply</button>
+        </div>
+
+        <div id="status" class="status muted small" role="status"></div>
+      </div>
+    </details>
+
+    <footer class="p-footer">Version 2.2</footer>
+  </main>
+
+  <script src="icons.js"></script>
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

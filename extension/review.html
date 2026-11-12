@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Review Application · ApplyFlow AI</title>
+  <link rel="stylesheet" href="common.css">
+  <link rel="stylesheet" href="review.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo"><span data-icon="logo" data-size="28"></span>ApplyFlow <span class="muted" style="font-weight:500">· Review</span></div>
+    <div class="row">
+      <span id="statusBadge"></span>
+      <a class="btn small" href="dashboard.html" target="_blank">Dashboard</a>
+    </div>
+  </header>
+
+  <main class="page">
+    <div id="banners"></div>
+
+    <div id="loading" class="card loading-card">
+      <span class="spinner"></span>
+      <div>
+        <strong id="loadingTitle">Loading application…</strong>
+        <div class="muted small" id="loadingText"></div>
+      </div>
+    </div>
+
+    <div id="layout" class="layout hidden">
+      <!-- LEFT: job + resume match -->
+      <section class="col">
+        <div class="card">
+          <div class="row" style="margin-bottom:6px">
+            <span id="sourceBadge"></span>
+            <span class="spacer"></span>
+            <a id="postLink" class="btn small hidden" target="_blank" rel="noopener noreferrer">Open LinkedIn post ↗</a>
+          </div>
+          <h1 id="jobTitle" class="job-title"></h1>
+          <div id="jobCompany" class="muted" style="margin-bottom:14px"></div>
+          <dl class="kv" id="jobDetails"></dl>
+          <div id="jobSkillsWrap" class="hidden" style="margin-top:14px">
+            <div class="muted small" style="margin-bottom:6px">Required skills</div>
+            <div class="chips" id="jobSkills"></div>
+          </div>
+          <details class="post-text">
+            <summary>Original post</summary>
+            <pre id="postText"></pre>
+          </details>
+        </div>
+
+        <div class="card">
+          <h2>Resume match <span id="matchModel" class="muted small" style="font-weight:400"></span></h2>
+          <div id="matchList"></div>
+          <div class="row" style="margin-top:12px">
+            <button id="rematchBtn" class="btn small">Re-run matching</button>
+            <a class="btn small" href="dashboard.html#resumes" target="_blank">Manage resumes</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: email composer -->
+      <section class="col">
+        <div class="card composer">
+          <h2>Application email</h2>
+
+          <div id="gmailLine" class="gmail-line"></div>
+
+          <label for="emailTo">To (recruiter email)</label>
+          <input id="emailTo" type="email" placeholder="recruiter@company.com" autocomplete="off">
+          <div id="toHint" class="muted small hidden" style="margin-top:4px">No email address was found in the post — check the post's application instructions.</div>
+
+          <label for="emailSubject">Subject</label>
+          <input id="emailSubject" type="text">
+
+          <label for="emailBody">Message</label>
+          <textarea id="emailBody" rows="16"></textarea>
+
+          <div class="attachment">
+            <span data-icon="attach"></span>
+            <div>
+              <div id="attachName" style="font-weight:600"></div>
+              <div class="muted small">PDF resume will be attached</div>
+            </div>
+            <span class="spacer"></span>
+            <a id="attachView" class="btn small" target="_blank">View</a>
+          </div>
+
+          <div class="row" style="margin-top:14px">
+            <button id="regenBtn" class="btn"><span data-icon="refresh" data-size="14"></span>Rewrite</button>
+            <button id="copyBtn" class="btn">Copy text</button>
+            <span class="spacer"></span>
+            <span id="saveState" class="muted small"></span>
+          </div>
+
+          <button id="sendBtn" class="btn primary big send">Send Application</button>
+          <p class="muted small center">Nothing is sent until you click Send and confirm.</p>
+        </div>
+
+        <div class="card">
+          <h2>Tracking</h2>
+          <div class="row">
+            <label for="statusSelect" style="margin:0">Status</label>
+            <select id="statusSelect" style="width:auto"></select>
+            <span class="spacer"></span>
+            <button id="markAppliedBtn" class="btn small" title="Use this if you applied another way">Mark as applied manually</button>
+          </div>
+          <label for="notes">Notes</label>
+          <textarea id="notes" rows="3" placeholder="e.g. Followed up on LinkedIn, interview on Friday…"></textarea>
+          <div id="history" class="muted small" style="margin-top:10px"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="icons.js"></script>
+  <script src="common.js"></script>
+  <script src="review.js"></script>
+</body>
+</html>

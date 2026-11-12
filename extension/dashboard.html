@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard · ApplyFlow AI</title>
+  <link rel="stylesheet" href="common.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo"><span data-icon="logo" data-size="28"></span>ApplyFlow</div>
+    <nav class="segmented tabs" role="tablist">
+      <button class="tab" data-tab="applications" role="tab">Applications</button>
+      <button class="tab" data-tab="resumes" role="tab">Resumes</button>
+      <button class="tab" data-tab="settings" role="tab">Settings</button>
+    </nav>
+    <span id="backendDot" class="badge"><span class="dot"></span><span id="backendText">Checking…</span></span>
+  </header>
+
+  <main class="page">
+    <div id="offlineBanner" class="banner danger hidden">
+      <span data-icon="warning"></span>
+      <span>Can't reach the ApplyFlow backend. Open PowerShell in the <code>backend</code> folder and run
+      <code>npm.cmd start</code>, then refresh this page.</span>
+    </div>
+
+    <!-- ============ APPLICATIONS ============ -->
+    <section id="tab-applications" class="tab-panel">
+      <h1 class="section-title">Applications</h1>
+      <p class="section-sub">Every hiring post ApplyFlow has found, and where each application stands.</p>
+      <div class="stats">
+        <div class="stat"><div class="stat-value" id="statTotal">0</div><div class="stat-label">Opportunities</div></div>
+        <div class="stat"><div class="stat-value" id="statReady">0</div><div class="stat-label">Ready to apply</div></div>
+        <div class="stat"><div class="stat-value" id="statApplied">0</div><div class="stat-label">Applied</div></div>
+        <div class="stat"><div class="stat-value" id="statInterview">0</div><div class="stat-label">Interviews</div></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="margin-bottom:14px">
+          <input id="appSearch" type="search" placeholder="Search role, company, recruiter…" style="max-width:320px">
+          <select id="appFilter" style="width:auto">
+            <option value="">All statuses</option>
+          </select>
+          <span class="spacer"></span>
+          <button id="refreshApps" class="btn small">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table class="apps">
+            <thead>
+              <tr>
+                <th>Role</th>
+                <th>Recruiter</th>
+                <th>Detected</th>
+                <th>Applied</th>
+                <th>Resume</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="appRows"></tbody>
+          </table>
+        </div>
+        <div id="appEmpty" class="empty hidden">
+          No opportunities yet. Browse your LinkedIn feed — hiring posts will appear here automatically.
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ RESUMES ============ -->
+    <section id="tab-resumes" class="tab-panel hidden">
+      <h1 class="section-title">Resumes</h1>
+      <p class="section-sub">ApplyFlow picks the best one for every post. Files never leave your computer.</p>
+      <div id="migrateBanner" class="banner info hidden">
+        <span id="migrateText" style="flex:1"></span>
+        <button id="migrateBtn" class="btn small primary">Import them</button>
+      </div>
+
+      <div class="card">
+        <h2><span data-icon="upload"></span>Add a resume</h2>
+        <form id="uploadForm" class="upload-grid">
+          <div>
+            <label for="upFile">PDF file (max 5 MB)</label>
+            <input id="upFile" type="file" accept=".pdf,application/pdf" required>
+          </div>
+          <div>
+            <label for="upLabel">Name</label>
+            <input id="upLabel" type="text" placeholder="e.g. Product Manager Resume" maxlength="80">
+          </div>
+          <div>
+            <label for="upCategory">Best for</label>
+            <select id="upCategory"></select>
+          </div>
+          <div class="upload-btn">
+            <button id="upBtn" class="btn primary" type="submit">Upload & analyse</button>
+          </div>
+        </form>
+        <p class="muted small" style="margin:10px 0 0">
+          Gemini reads each resume once and saves a profile (skills, experience, projects). Files stay on your computer in <code>backend/data</code>.
+        </p>
+      </div>
+
+      <div id="resumeList"></div>
+      <div id="resumeEmpty" class="card empty hidden">No resumes yet. Upload your first one above.</div>
+      <input id="replaceInput" type="file" accept=".pdf,application/pdf" class="hidden">
+    </section>
+
+    <!-- ============ SETTINGS ============ -->
+    <section id="tab-settings" class="tab-panel hidden">
+      <h1 class="section-title">Settings</h1>
+      <p class="section-sub">Your Gmail connection, your details, and how your emails should sound.</p>
+      <div class="settings-grid">
+        <div>
+          <div class="card">
+            <h2><span data-icon="mail"></span>Gmail</h2>
+            <div id="gmailBox"></div>
+          </div>
+
+          <div class="card">
+            <h2><span data-icon="sparkle"></span>Gemini</h2>
+            <dl class="kv" id="geminiInfo"></dl>
+            <div class="row" style="margin-top:12px">
+              <button id="testGemini" class="btn small">Test Gemini connection</button>
+              <span id="testGeminiResult" class="small muted"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2><span data-icon="user"></span>Your details &amp; writing style</h2>
+          <p class="muted small" style="margin-top:-6px">Used when drafting emails. Leave blank to use the name from your resume.</p>
+          <form id="settingsForm">
+            <div class="two">
+              <div><label for="sName">Your name</label><input id="sName" name="senderName" type="text" maxlength="120"></div>
+              <div><label for="sPhone">Phone</label><input id="sPhone" name="phone" type="text" maxlength="40"></div>
+            </div>
+            <label for="sLinkedin">LinkedIn profile URL</label>
+            <input id="sLinkedin" name="linkedinUrl" type="url" maxlength="300" placeholder="https://www.linkedin.com/in/…">
+            <label for="sSignature">Email signature (optional — overrides the three fields above)</label>
+            <textarea id="sSignature" name="signature" rows="3" maxlength="600" placeholder="Leave blank for:&#10;Warm regards,&#10;Your Name | Phone&#10;LinkedIn URL"></textarea>
+            <label for="sStyle">Example email I like</label>
+            <textarea id="sStyle" name="styleExample" rows="9" maxlength="4000" placeholder="Paste an application email you're happy with (e.g. one ChatGPT wrote). Every draft will follow its tone, length and structure — but with facts from your resume and the new post."></textarea>
+            <label for="sTone">Tone</label>
+            <input id="sTone" name="emailTone" type="text" maxlength="120" placeholder="professional, warm and confident">
+            <label for="sPrefs">Writing preferences</label>
+            <textarea id="sPrefs" name="extraInstructions" rows="3" maxlength="1000" placeholder="e.g. Keep it under 120 words. Use British spelling. Don't use exclamation marks."></textarea>
+            <label for="sFacts">Facts the email may use</label>
+            <textarea id="sFacts" name="candidateNotes" rows="3" maxlength="1000" placeholder="e.g. Notice period: 30 days. Current location: Pune. Open to relocation."></textarea>
+            <div class="row" style="margin-top:14px">
+              <button class="btn primary" type="submit">Save settings</button>
+              <span id="settingsSaved" class="muted small"></span>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="icons.js"></script>
+  <script src="common.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+node_modules/
+.env
+# Personal data: uploaded resumes, applications, Gmail tokens
+data/
+*.tmp

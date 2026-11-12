@@ -1,0 +1,43 @@
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
+.col { min-width: 0; }
+.loading-card { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.job-title { font-size: 26px; font-weight: 700; letter-spacing: -0.03em; margin-top: 8px; }
+
+.post-text { margin-top: 18px; }
+.post-text summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; }
+.post-text pre {
+  white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.55; background: var(--surface-2);
+  padding: 14px; border-radius: 12px; max-height: 320px; overflow: auto; margin: 10px 0 0;
+}
+
+.match {
+  border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; cursor: pointer;
+  display: block; margin: 0; transition: border-color .15s, box-shadow .15s;
+}
+.match + .match { margin-top: 10px; }
+.match:hover { border-color: var(--faint); }
+.match.selected { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.match-head { display: flex; align-items: center; gap: 10px; }
+.match-head input { margin: 0; accent-color: var(--ink); }
+.match-name { font-weight: 600; flex: 1; min-width: 0; color: var(--text); }
+.score { font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.score-bar { height: 4px; border-radius: 99px; background: var(--surface-3); margin: 10px 0 8px; overflow: hidden; }
+.score-bar > div { height: 100%; border-radius: 99px; background: var(--ink) !important; }
+.match ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--text-2); }
+.match .sub { font-size: 12px; color: var(--muted); margin-top: 10px; font-weight: 500; }
+
+.gmail-line {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+  background: var(--surface-2); font-size: 13px;
+}
+.attachment {
+  display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 12px;
+  border-radius: 12px; background: var(--surface-2); color: var(--text-2);
+}
+.send { width: 100%; margin-top: 18px; }
+.center { text-align: center; }
+.composer textarea { font-size: 14px; line-height: 1.62; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+}

@@ -1,0 +1,512 @@
+// ==========================================
+// APPLYFLOW AI — DASHBOARD
+// Tabs: Applications · Resumes · Settings
+// ==========================================
+const CATEGORIES = [
+  ["Product", "Product Management"], ["Analyst", "Data / Business Analyst"], ["Operations", "Operations"],
+  ["Consulting", "Consulting"], ["Software Engineering", "Software Engineering"], ["Core Engineering", "Core Engineering"],
+  ["Sales", "Sales"], ["Marketing", "Marketing"], ["Finance", "Finance"], ["HR", "HR"], ["General", "General / Other"]
+];
+
+let applications = [];
+let statuses = [];
+let resumes = [];
+let pollTimer = null;
+
+// ------------------------------------------
+// Tabs (remembers the tab via the URL hash, e.g. dashboard.html#resumes)
+// ------------------------------------------
+function showTab(name) {
+  if (!["applications", "resumes", "settings"].includes(name)) name = "applications";
+  $all(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  $all(".tab-panel").forEach(p => p.classList.toggle("hidden", p.id !== `tab-${name}`));
+  if (location.hash !== `#${name}`) history.replaceState(null, "", `#${name}`);
+  if (name === "applications") loadApplications();
+  if (name === "resumes") loadResumes();
+  if (name === "settings") loadSettings();
+}
+$all(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
+window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
+
+function handleError(error) {
+  if (error.code === "BACKEND_OFFLINE") {
+    $("#offlineBanner").classList.remove("hidden");
+    $("#backendDot").className = "badge danger";
+    $("#backendText").textContent = "Offline";
+  } else {
+    toast(error.message, "error");
+  }
+}
+
+async function checkBackend() {
+  try {
+    await api("/api/status", { timeout: 5000 });
+    $("#offlineBanner").classList.add("hidden");
+    $("#backendDot").className = "badge ok";
+    $("#backendText").textContent = "Live";
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+// ==========================================
+// APPLICATIONS
+// ==========================================
+async function loadApplications() {
+  try {
+    const [appData, resumeData] = await Promise.all([api("/api/applications"), api("/api/resumes")]);
+    applications = appData.applications;
+    statuses = appData.statuses;
+    resumes = resumeData.resumes;
+
+    const filter = $("#appFilter");
+    if (filter.options.length <= 1) {
+      filter.insertAdjacentHTML("beforeend", statuses.map(s => `<option>${esc(s)}</option>`).join(""));
+    }
+    renderApplications();
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+function renderApplications() {
+  $("#statTotal").textContent = applications.length;
+  $("#statReady").textContent = applications.filter(a => a.status === "Ready to Apply").length;
+  $("#statApplied").textContent = applications.filter(a => a.appliedAt).length;
+  $("#statInterview").textContent = applications.filter(a => a.status === "Interview").length;
+
+  const q = $("#appSearch").value.trim().toLowerCase();
+  const status = $("#appFilter").value;
+  const rows = applications.filter(a => {
+    if (status && a.status !== status) return false;
+    if (!q) return true;
+    const j = a.job || {};
+    return [j.jobTitle, j.company, j.recruiter, j.email, j.location, a.notes].join(" ").toLowerCase().includes(q);
+  });
+
+  $("#appEmpty").classList.toggle("hidden", rows.length > 0);
+  $("#appEmpty").textContent = applications.length
+    ? "No applications match your search."
+    : "No opportunities yet. Browse your LinkedIn feed — hiring posts will appear here automatically.";
+
+  $("#appRows").innerHTML = rows.map(a => {
+    const j = a.job || {};
+    const resume = resumes.find(r => r.id === a.resumeId);
+    return `
+      <tr data-id="${esc(a.id)}">
+        <td class="role">
+          <strong>${esc(j.jobTitle || "Untitled role")}</strong>
+          <span class="muted small">${esc([j.company, j.location].filter(Boolean).join(" · ") || "—")}</span>
+        </td>
+        <td>${esc(j.recruiter || "—")}<div class="muted small">${esc(j.email || "no email")}</div></td>
+        <td class="small">${esc(formatDate(a.detectedAt))}</td>
+        <td class="small">${esc(formatDate(a.appliedAt))}</td>
+        <td class="small">${esc(resume?.label || "—")}</td>
+        <td>
+          <select data-action="status" aria-label="Status">
+            ${statuses.map(s => `<option ${s === a.status ? "selected" : ""}>${esc(s)}</option>`).join("")}
+          </select>
+        </td>
+        <td class="actions">
+          ${a.sourceUrl ? `<a class="btn small" href="${esc(a.sourceUrl)}" target="_blank" rel="noopener noreferrer" title="Open LinkedIn post" aria-label="Open LinkedIn post">${AF_ICONS.external(14)}</a>` : ""}
+          <a class="btn small primary" href="review.html?id=${encodeURIComponent(a.id)}" target="_blank">${a.appliedAt ? "Open" : "Review"}</a>
+          <button class="btn small danger" data-action="delete" title="Delete" aria-label="Delete">${AF_ICONS.trash(14)}</button>
+        </td>
+      </tr>`;
+  }).join("");
+}
+
+$("#appSearch").addEventListener("input", renderApplications);
+$("#appFilter").addEventListener("change", renderApplications);
+$("#refreshApps").addEventListener("click", loadApplications);
+
+$("#appRows").addEventListener("change", async (e) => {
+  if (e.target.dataset.action !== "status") return;
+  const id = e.target.closest("tr").dataset.id;
+  try {
+    const data = await api(`/api/applications/${encodeURIComponent(id)}`, { method: "PATCH", body: { status: e.target.value } });
+    Object.assign(applications.find(a => a.id === id), data.application);
+    renderApplications();
+    toast(`Status updated to ${e.target.value}.`);
+  } catch (error) {
+    handleError(error);
+  }
+});
+
+$("#appRows").addEventListener("click", async (e) => {
+  if (e.target.closest("[data-action]")?.dataset.action !== "delete") return;
+  const id = e.target.closest("tr").dataset.id;
+  const a = applications.find(x => x.id === id);
+  const ok = await confirmDialog({
+    title: "Delete this opportunity?",
+    html: `<strong>${esc(a?.job?.jobTitle || "This item")}</strong> will be removed from your history. This can't be undone.`,
+    confirmText: "Delete", danger: true
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/applications/${encodeURIComponent(id)}`, { method: "DELETE" });
+    applications = applications.filter(x => x.id !== id);
+    renderApplications();
+  } catch (error) {
+    handleError(error);
+  }
+});
+
+// ==========================================
+// RESUMES
+// ==========================================
+$("#upCategory").innerHTML = CATEGORIES.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+
+async function loadResumes() {
+  try {
+    resumes = (await api("/api/resumes")).resumes;
+    renderResumes();
+    schedulePoll();
+  } catch (error) {
+    handleError(error);
+  }
+  checkOldLibrary();
+}
+
+// While Gemini is analysing a resume, refresh every 3 seconds.
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (resumes.some(r => ["pending", "analysing"].includes(r.analysisStatus))) {
+    pollTimer = setTimeout(async () => {
+      try {
+        resumes = (await api("/api/resumes")).resumes;
+        renderResumes();
+      } catch { /* try again next tick */ }
+      schedulePoll();
+    }, 3000);
+  }
+}
+
+function analysisBadge(r) {
+  switch (r.analysisStatus) {
+    case "done": return `<span class="badge ok"><span class="dot"></span>Ready</span>`;
+    case "failed": return `<span class="badge danger"><span class="dot"></span>Analysis failed</span>`;
+    default: return `<span class="badge"><span class="spinner" style="width:11px;height:11px"></span>Analysing</span>`;
+  }
+}
+
+function list(items, max = 6) {
+  if (!items?.length) return `<span class="muted small">—</span>`;
+  return `<ul>${items.slice(0, max).map(i => `<li>${esc(i)}</li>`).join("")}</ul>`;
+}
+
+function renderResumes() {
+  $("#resumeEmpty").classList.toggle("hidden", resumes.length > 0);
+  $("#resumeList").innerHTML = resumes.map(r => {
+    const p = r.profile;
+    return `
+      <div class="card resume" data-id="${esc(r.id)}">
+        <div class="resume-head">
+          <div class="resume-title">
+            <input type="text" value="${esc(r.label)}" data-action="rename" maxlength="80" aria-label="Resume name">
+            <div class="resume-meta">${esc(r.originalName)} · ${r.pages || "?"} page${r.pages === 1 ? "" : "s"} · ${(r.size / 1024).toFixed(0)} KB · updated ${esc(formatDate(r.updatedAt))}</div>
+          </div>
+          <select data-action="category" style="width:auto" aria-label="Category">
+            ${CATEGORIES.map(([v, l]) => `<option value="${esc(v)}" ${v === r.category ? "selected" : ""}>${esc(l)}</option>`).join("")}
+          </select>
+          ${r.isDefault ? `<span class="badge solid">Default</span>` : ""}
+          ${analysisBadge(r)}
+        </div>
+
+        ${r.analysisStatus === "failed" ? `<div class="banner warn" style="margin:12px 0 0">${esc(r.analysisError || "Gemini couldn't analyse this resume.")}</div>` : ""}
+
+        ${p ? `
+          <div class="resume-body">
+            <div>
+              <div class="sub">Profile</div>
+              <div style="font-size:13px">${esc(p.headline || p.summary || "—")}</div>
+              ${p.totalExperienceYears != null ? `<div class="muted small" style="margin-top:4px">${esc(p.totalExperienceYears)} years full-time experience</div>` : ""}
+            </div>
+            <div>
+              <div class="sub">Best suited for</div>
+              <div class="chips">${(p.suitableRoles || []).map(x => `<span class="chip">${esc(x)}</span>`).join("") || "—"}</div>
+            </div>
+            <div>
+              <div class="sub">Skills & tools</div>
+              <div class="chips">${[...(p.skills || []), ...(p.tools || [])].slice(0, 18).map(x => `<span class="chip">${esc(x)}</span>`).join("") || "—"}</div>
+            </div>
+            <div>
+              <div class="sub">Experience</div>
+              ${list((p.experience || []).map(e => `${e.role}${e.organisation ? " — " + e.organisation : ""}${e.isInternship ? " (internship)" : ""}`), 5)}
+            </div>
+            <div>
+              <div class="sub">Projects</div>
+              ${list((p.projects || []).map(x => x.name), 5)}
+            </div>
+            <div>
+              <div class="sub">Education & certifications</div>
+              ${list([...(p.education || []), ...(p.certifications || [])], 5)}
+            </div>
+          </div>` : ""}
+
+        <div class="resume-actions">
+          <a class="btn small" href="${API_BASE}/api/resumes/${encodeURIComponent(r.id)}/file" target="_blank">View PDF</a>
+          ${r.isDefault ? "" : `<button class="btn small" data-action="default">Set as default</button>`}
+          <button class="btn small" data-action="replace">Replace PDF</button>
+          <button class="btn small" data-action="reanalyse">Re-analyse</button>
+          <span class="spacer"></span>
+          <button class="btn small danger" data-action="delete">Delete</button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+async function patchResume(id, body, message) {
+  try {
+    const data = await api(`/api/resumes/${encodeURIComponent(id)}`, { method: "PATCH", body });
+    if (body.isDefault) resumes.forEach(r => { r.isDefault = r.id === id; });
+    Object.assign(resumes.find(r => r.id === id), data.resume);
+    renderResumes();
+    if (message) toast(message);
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+$("#resumeList").addEventListener("change", (e) => {
+  const id = e.target.closest(".resume")?.dataset.id;
+  if (!id) return;
+  if (e.target.dataset.action === "rename") patchResume(id, { label: e.target.value }, "Resume renamed.");
+  if (e.target.dataset.action === "category") patchResume(id, { category: e.target.value }, "Category updated.");
+});
+
+let replaceTarget = null;
+$("#resumeList").addEventListener("click", async (e) => {
+  const action = e.target.closest("[data-action]")?.dataset.action;
+  const id = e.target.closest(".resume")?.dataset.id;
+  if (!id || !action || ["rename", "category"].includes(action)) return;
+  const r = resumes.find(x => x.id === id);
+
+  if (action === "default") patchResume(id, { isDefault: true }, `${r.label} is now your default resume.`);
+
+  if (action === "replace") {
+    replaceTarget = id;
+    $("#replaceInput").value = "";
+    $("#replaceInput").click();
+  }
+
+  if (action === "reanalyse") {
+    r.analysisStatus = "analysing";
+    renderResumes();
+    try {
+      const data = await api(`/api/resumes/${encodeURIComponent(id)}/analyze`, { method: "POST", timeout: 90000 });
+      Object.assign(r, data.resume);
+      renderResumes();
+      toast(r.analysisStatus === "done" ? "Resume analysed." : "Analysis failed — see the message on the card.", r.analysisStatus === "done" ? "info" : "error");
+    } catch (error) {
+      handleError(error);
+      loadResumes();
+    }
+  }
+
+  if (action === "delete") {
+    const ok = await confirmDialog({
+      title: "Delete resume?",
+      html: `<strong>${esc(r.label)}</strong> and its PDF will be permanently deleted from your computer.`,
+      confirmText: "Delete", danger: true
+    });
+    if (!ok) return;
+    try {
+      await api(`/api/resumes/${encodeURIComponent(id)}`, { method: "DELETE" });
+      toast("Resume deleted.");
+      loadResumes();
+    } catch (error) {
+      handleError(error);
+    }
+  }
+});
+
+$("#replaceInput").addEventListener("change", async () => {
+  const file = $("#replaceInput").files[0];
+  if (!file || !replaceTarget) return;
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    await api(`/api/resumes/${encodeURIComponent(replaceTarget)}/file`, { method: "PUT", form, timeout: 60000 });
+    toast("PDF replaced — re-analysing with Gemini…");
+    loadResumes();
+  } catch (error) {
+    handleError(error);
+  }
+});
+
+async function uploadResume(file, label, category) {
+  const form = new FormData();
+  form.append("file", file);
+  if (label) form.append("label", label);
+  form.append("category", category);
+  return api("/api/resumes", { method: "POST", form, timeout: 60000 });
+}
+
+$("#uploadForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const file = $("#upFile").files[0];
+  if (!file) return toast("Please choose a PDF file.", "error");
+  if (file.size > 5 * 1024 * 1024) return toast("Resume must be 5 MB or smaller.", "error");
+  $("#upBtn").disabled = true;
+  $("#upBtn").innerHTML = `<span class="spinner"></span> Uploading…`;
+  try {
+    await uploadResume(file, $("#upLabel").value.trim(), $("#upCategory").value);
+    $("#uploadForm").reset();
+    toast("Uploaded! Gemini is analysing it now…");
+    loadResumes();
+  } catch (error) {
+    handleError(error);
+  } finally {
+    $("#upBtn").disabled = false;
+    $("#upBtn").textContent = "Upload & analyse";
+  }
+});
+
+// ------------------------------------------
+// Import from the OLD in-browser resume library (IndexedDB "ApplyFlowResumes")
+// ------------------------------------------
+function readOldLibrary() {
+  return new Promise((resolve) => {
+    let request;
+    try {
+      request = indexedDB.open("ApplyFlowResumes");
+    } catch {
+      return resolve([]);
+    }
+    request.onerror = () => resolve([]);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("resumes")) { db.close(); return resolve([]); }
+      const get = db.transaction("resumes", "readonly").objectStore("resumes").getAll();
+      get.onsuccess = () => { db.close(); resolve((get.result || []).filter(r => r.file instanceof Blob)); };
+      get.onerror = () => { db.close(); resolve([]); };
+    };
+  });
+}
+
+async function checkOldLibrary() {
+  const { oldLibraryImported } = await chrome.storage.local.get("oldLibraryImported").catch(() => ({}));
+  if (oldLibraryImported) return;
+  const old = await readOldLibrary();
+  if (!old.length) return;
+  $("#migrateText").textContent = `Found ${old.length} resume${old.length === 1 ? "" : "s"} in your old ApplyFlow library (from the earlier version).`;
+  $("#migrateBanner").classList.remove("hidden");
+}
+
+$("#migrateBtn").addEventListener("click", async () => {
+  const old = await readOldLibrary();
+  $("#migrateBtn").disabled = true;
+  let ok = 0;
+  for (const r of old) {
+    try {
+      const label = String(r.name || "Resume").replace(/\.pdf$/i, "");
+      const category = CATEGORIES.some(([v]) => v === r.category) ? r.category : "General";
+      await uploadResume(new File([r.file], r.name || "resume.pdf", { type: "application/pdf" }), label, category);
+      ok++;
+    } catch (error) {
+      toast(`Couldn't import ${r.name}: ${error.message}`, "error");
+    }
+  }
+  await chrome.storage.local.set({ oldLibraryImported: true }).catch(() => {});
+  $("#migrateBanner").classList.add("hidden");
+  toast(`Imported ${ok} of ${old.length} resumes. Gemini is analysing them…`);
+  loadResumes();
+});
+
+// ==========================================
+// SETTINGS
+// ==========================================
+async function loadSettings() {
+  try {
+    const [settingsData, status] = await Promise.all([api("/api/settings"), api("/api/status")]);
+    const s = settingsData.settings;
+    for (const el of $("#settingsForm").elements) {
+      if (el.name && s[el.name] !== undefined) el.value = s[el.name];
+    }
+    renderGmail(status.gmail);
+    $("#geminiInfo").innerHTML = `
+      <dt>Fast models</dt><dd>${esc(status.models.fast.join(" → "))}</dd>
+      <dt>Smart models</dt><dd>${esc(status.models.smart.join(" → "))}</dd>
+      <dt>Resumes analysed</dt><dd>${status.analysedResumes} of ${status.resumes}</dd>`;
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+function renderGmail(g) {
+  const box = $("#gmailBox");
+  if (!g.configured) {
+    box.innerHTML = `
+      <div class="banner warn" style="margin-bottom:8px">Gmail isn't set up yet. One-time setup (about 10 minutes):</div>
+      <ol class="steps">
+        <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> and create a project (e.g. “ApplyFlow AI”).</li>
+        <li><b>APIs & Services → Library</b> → enable <b>Gmail API</b>.</li>
+        <li><b>OAuth consent screen</b> → External → fill app name + your email → add yourself under <b>Test users</b>.</li>
+        <li><b>Credentials → Create credentials → OAuth client ID</b> → type <b>Desktop app</b>.</li>
+        <li>Copy the Client ID and Client secret into <code>backend/.env</code>:<br>
+          <code>GOOGLE_CLIENT_ID=…</code><br><code>GOOGLE_CLIENT_SECRET=…</code></li>
+        <li>Restart the backend, then refresh this page.</li>
+      </ol>
+      <p class="muted small">Full guide: README.md in the project folder.</p>`;
+  } else if (!g.connected) {
+    box.innerHTML = `
+      <p style="margin-top:0">Connect the Gmail account you apply from. ApplyFlow only asks for permission to <b>send</b> email — it can't read your inbox, and your password is never shared.</p>
+      <button class="btn primary" id="gmailConnect">Connect Gmail</button>`;
+    $("#gmailConnect").onclick = () => window.open(`${API_BASE}/auth/google`, "_blank");
+  } else {
+    box.innerHTML = `
+      <p style="margin-top:0" class="row"><span class="badge ok"><span class="dot"></span>Connected</span><strong>${esc(g.email || "your Gmail account")}</strong></p>
+      <button class="btn small danger" id="gmailDisconnect">Disconnect</button>`;
+    $("#gmailDisconnect").onclick = async () => {
+      if (!(await confirmDialog({ title: "Disconnect Gmail?", html: "ApplyFlow will no longer be able to send emails until you reconnect.", confirmText: "Disconnect", danger: true }))) return;
+      try {
+        await api("/api/gmail/disconnect", { method: "POST" });
+        toast("Gmail disconnected.");
+        loadSettings();
+      } catch (error) {
+        handleError(error);
+      }
+    };
+  }
+}
+
+$("#settingsForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {};
+  for (const el of $("#settingsForm").elements) if (el.name) body[el.name] = el.value;
+  try {
+    await api("/api/settings", { method: "PUT", body });
+    $("#settingsSaved").textContent = "Saved";
+    setTimeout(() => { $("#settingsSaved").textContent = ""; }, 2500);
+  } catch (error) {
+    handleError(error);
+  }
+});
+
+$("#testGemini").addEventListener("click", async () => {
+  const out = $("#testGeminiResult");
+  out.innerHTML = `<span class="spinner"></span>`;
+  try {
+    const r = await api("/api/test-gemini", { timeout: 70000 });
+    out.textContent = `${r.model} replied in ${r.responseTime}`;
+  } catch (error) {
+    out.textContent = `Failed: ${error.message}`;
+  }
+});
+
+// Returning from the Google sign-in tab → refresh Gmail status.
+window.addEventListener("focus", () => {
+  if (!$("#tab-settings").classList.contains("hidden")) loadSettings();
+});
+
+// ------------------------------------------
+// Start
+// ------------------------------------------
+// Fill static icons: <span data-icon="mail"></span>
+$all("[data-icon]").forEach((el) => {
+  const make = AF_ICONS[el.dataset.icon];
+  if (make) el.outerHTML = make(Number(el.dataset.size) || 16);
+});
+checkBackend();
+showTab(location.hash.slice(1) || "applications");

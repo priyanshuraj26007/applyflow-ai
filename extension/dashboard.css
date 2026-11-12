@@ -1,0 +1,50 @@
+/* Tabs use the shared .segmented control (common.css) */
+
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.stat {
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius);
+  padding: 18px 20px; box-shadow: var(--shadow);
+}
+.stat-value { font-size: 34px; font-weight: 700; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat-label { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+.table-wrap { overflow-x: auto; margin: 0 -8px; }
+table.apps { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.apps th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 8px; border-bottom: 1px solid var(--hairline); }
+.apps td { padding: 14px 8px; border-bottom: 1px solid var(--hairline); vertical-align: middle; }
+.apps tr:last-child td { border-bottom: none; }
+.apps tbody tr { transition: background .12s; }
+.apps tbody tr:hover { background: var(--surface-2); }
+.apps .role strong { display: block; font-weight: 600; letter-spacing: -0.01em; }
+.apps select { width: auto; padding: 5px 30px 5px 10px; font-size: 12.5px; border-radius: 9px; background-position: right 9px center; }
+.apps .actions { white-space: nowrap; text-align: right; }
+.apps .actions .btn { margin-left: 4px; }
+
+.upload-grid { display: grid; grid-template-columns: 1.3fr 1.3fr 1fr auto; gap: 12px; align-items: end; }
+.upload-grid label { margin-top: 0; }
+.upload-btn { padding-bottom: 1px; }
+
+.resume { margin-top: 16px; }
+.resume-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.resume-title { flex: 1; min-width: 200px; }
+.resume-title input {
+  font-weight: 650; font-size: 17px; letter-spacing: -0.02em; border-color: transparent; background: transparent;
+  padding: 4px 8px; margin-left: -8px;
+}
+.resume-title input:hover { border-color: var(--border); }
+.resume-meta { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.resume-body { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px; }
+.resume-body .sub { font-size: 12px; color: var(--muted); font-weight: 500; margin-bottom: 6px; }
+.resume-body ul { margin: 0; padding-left: 18px; font-size: 13.5px; }
+.resume-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+.resume-head select { width: auto; }
+
+.settings-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 16px; align-items: start; }
+.settings-grid > div > .card + .card { margin-top: 16px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.steps { margin: 10px 0 0; padding-left: 20px; font-size: 13.5px; line-height: 1.75; }
+
+@media (max-width: 900px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .upload-grid, .settings-grid, .resume-body, .two { grid-template-columns: 1fr; }
+}
