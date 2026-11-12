@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 process.env.GEMINI_HEDGE_MS = "40";               // race after 40ms instead of 5s
 process.env.GEMINI_MODELS_DRAFT = "m1,m2,m3";
 process.env.GEMINI_MODELS_SMART = "s1,s2";
+process.env.GEMINI_RETRY_DELAY_MS = "30";         // retry round after 30ms instead of 2s
 
 const { callGemini, _setClientForTests } = await import("../lib/gemini.js");
 
@@ -18,7 +19,9 @@ function fakeClient() {
     models: {
       generateContent({ model, config }) {
         calls.push(model);
-        const b = behaviour[model] || { delay: 5 };
+        const spec = behaviour[model] || { delay: 5 };
+        const n = calls.filter(m => m === model).length - 1;
+        const b = Array.isArray(spec) ? spec[Math.min(n, spec.length - 1)] : spec;
         return new Promise((resolve, reject) => {
           const timer = setTimeout(() => {
             if (b.fail) reject(Object.assign(new Error(`fake ${b.fail}`), { status: b.fail }));
@@ -64,10 +67,45 @@ test("failed model → next one starts immediately", async () => {
   assert.deepEqual(calls, ["m1", "m2"]);
 });
 
-test("every model fails → clear error from the last failure", async () => {
+test("every model keeps failing → one retry round, then a clear error", async () => {
   behaviour = { m1: { delay: 5, fail: 503 }, m2: { delay: 5, fail: 429 }, m3: { delay: 5, fail: 503 } };
   await assert.rejects(callGemini("draft", "hi"), (err) => err.code === "GEMINI_OVERLOADED");
-  assert.deepEqual(calls, ["m1", "m2", "m3"]);
+  assert.deepEqual(calls, ["m1", "m2", "m3", "m1", "m2", "m3"]);
+});
+
+test("all models busy, then Google recovers → the retry round succeeds", async () => {
+  behaviour = {
+    m1: [{ delay: 5, fail: 503 }, { delay: 5 }],
+    m2: { delay: 5, fail: 503 },
+    m3: { delay: 5, fail: 504 }
+  };
+  const result = await callGemini("draft", "hi");
+  assert.equal(result.model, "m1");
+  assert.deepEqual(calls, ["m1", "m2", "m3", "m1"]);
+});
+
+test("a failed model is replaced at once, even while another is still running", async () => {
+  // m1 hangs → m2 is raced at 40ms → m2 fails at ~45ms → m3 must start then,
+  // not wait for m1.
+  behaviour = { m1: { delay: 2000 }, m2: { delay: 5, fail: 503 }, m3: { delay: 10 } };
+  const started = Date.now();
+  const result = await callGemini("draft", "hi");
+  assert.equal(result.model, "m3");
+  assert.ok(Date.now() - started < 400, "should not wait for the hung model");
+  assert.deepEqual(aborted, ["m1"]);
+});
+
+test("retired model (404) is skipped in the retry round", async () => {
+  behaviour = { m1: { delay: 5, fail: 404 }, m2: [{ delay: 5, fail: 503 }, { delay: 5 }], m3: { delay: 5, fail: 503 } };
+  const result = await callGemini("draft", "hi");
+  assert.equal(result.model, "m2");
+  assert.deepEqual(calls, ["m1", "m2", "m3", "m2"]);
+});
+
+test("bad API key after a busy model → no retry round", async () => {
+  behaviour = { m1: { delay: 5, fail: 503 }, m2: { delay: 5, fail: 403 } };
+  await assert.rejects(callGemini("draft", "hi"), (err) => err.code === "GEMINI_AUTH");
+  assert.deepEqual(calls, ["m1", "m2"]);
 });
 
 test("bad API key → stops at once (switching models can't fix it)", async () => {

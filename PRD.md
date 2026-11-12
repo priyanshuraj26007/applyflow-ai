@@ -135,6 +135,8 @@ only as a record of that early experiment.
   Each tier is an ordered list of models, configurable in `.env`.
 - **Automatic fallback.** On 429/500/503/504 or a retired model (404), the next model in the tier is tried.
 - **Racing (hedged requests).** If a model hasn't answered within 5 s, the next model is asked *in parallel* and the first valid answer wins. We added this after a single hung model caused 30-second drafts.
+- **Retry round.** During Gemini outages every model can return 503 within a few seconds. If all models in a tier fail for a temporary reason, ApplyFlow waits 2 s and tries the list once more, within a 30 s budget. It never retries a bad API key, and it skips retired models.
+- **Instant replacement.** A model that fails is replaced immediately, even while another model is still running, instead of waiting for the slow one to finish.
 - **One-shot drafting.** Matching and email writing used to be separate calls. Merging them into one call cut draft time from **21.6 s to 3.9 s**.
 - **Draft only on click.** Nothing is drafted in the background, which saves API quota.
 

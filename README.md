@@ -180,6 +180,9 @@ Run one with `node test-gemini.js` from the `backend` folder. The real automated
 | `GEMINI_DRAFT_TIMEOUT_MS` | Optional. Per-model timeout while drafting, default 12000. |
 | `GEMINI_HEDGE_MS` | Optional. If a model hasn't answered after this many ms, the next model is asked in parallel and the first answer wins (post reading + drafting only). Default 5000. |
 | `GEMINI_TIMEOUT_MS` | Optional. Per-model timeout, default 20000. |
+| `GEMINI_RETRY_ROUNDS` | Optional. If *every* model fails for a temporary reason (busy, rate-limited, timed out), try the whole list again this many times. Default 1. Set 0 to turn off. |
+| `GEMINI_RETRY_DELAY_MS` | Optional. Pause before a retry round, default 2000. |
+| `GEMINI_RETRY_BUDGET_MS` | Optional. A new retry round only starts if the request is still within this total time, default 30000. |
 | `ALLOWED_EXTENSION_ID` | Optional hardening: only your extension (ID from chrome://extensions) may call the API. |
 
 ## 5. Troubleshooting
