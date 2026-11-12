@@ -36,6 +36,8 @@ attaching a PDF, which takes 10–15 minutes every time.
 > goals, requirements, architecture and the decisions behind it.
 >
 > 🎨 Read the **[Product Showcase (SHOWCASE.md)](SHOWCASE.md)** to see what the final version looks like.
+>
+> 🧪 **Want to try it?** Follow **[TESTING.md](TESTING.md)**: one-click setup for Windows and Mac, about 15 minutes.
 
 ## How it works
 
