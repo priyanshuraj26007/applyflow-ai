@@ -111,3 +111,13 @@ test("Settings autofill: name, phone and LinkedIn come from the resume", async (
   assert.deepEqual(shown.contact, { name: "Priyanshu", phone: "+91 98", linkedin: "https://www.linkedin.com/in/abc-123" });
   assert.equal(shown.text, undefined, "full resume text is still never sent");
 });
+
+test("text with null characters / broken emoji (from odd PDFs) can always be saved", async () => {
+  const { jsonSafe } = await import("../lib/store.js");
+  const dirty = { text: "Priyanshu\u0000 Raj \uD83D", list: ["ok\u0000", "fine 😀"], n: 3 };
+  const clean = jsonSafe(dirty);
+  assert.equal(clean.text, "Priyanshu Raj ");
+  assert.deepEqual(clean.list, ["ok", "fine 😀"], "real emoji are kept");
+  assert.equal(clean.n, 3);
+  assert.ok(!JSON.stringify(clean).includes("\u0000"));
+});

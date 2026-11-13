@@ -71,6 +71,10 @@ export async function extractPdfText(buffer) {
   try {
     const result = await parser.getText();
     const text = (result.text || "")
+      // Some PDF makers put invisible control characters (e.g. \u0000) in the text.
+      // The database refuses them, so the upload failed with a 503. Drop them (keep \n and \t).
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "")
       .replace(/\r/g, "")
       .replace(/-- \d+ of \d+ --/g, "")
       .replace(/[ \t]+\n/g, "\n")

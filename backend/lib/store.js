@@ -118,6 +118,24 @@ function dbError(action, error) {
   });
 }
 
+/**
+ * Postgres jsonb refuses the null character (\u0000) and broken surrogate pairs, which
+ * can arrive in text copied from PDFs or web pages. Strip them from every string before
+ * saving, so one odd character can never make a save fail.
+ */
+export function jsonSafe(value) {
+  if (typeof value === "string") {
+    return value.includes("\u0000") || /[\uD800-\uDFFF]/.test(value)
+      ? value.replace(/\u0000/g, "").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "")
+      : value;
+  }
+  if (Array.isArray(value)) return value.map(jsonSafe);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [jsonSafe(k), jsonSafe(v)]));
+  }
+  return value;
+}
+
 const supabaseDriver = {
   async read(user, name) {
     const { data, error } = await (await db()).from(TABLE)
@@ -126,8 +144,9 @@ const supabaseDriver = {
     return data ? { value: data.value, version: data.version } : null;
   },
   /** Write only if nobody changed the document since we read it. Returns false on a clash. */
-  async writeIfUnchanged(user, name, value, version) {
+  async writeIfUnchanged(user, name, rawValue, version) {
     const client = await db();
+    const value = jsonSafe(rawValue);
     if (version === undefined) {
       const { error } = await client.from(TABLE).insert({ user_id: user, name, value, version: 1 });
       if (error?.code === "23505") return false;   // someone else created it first
