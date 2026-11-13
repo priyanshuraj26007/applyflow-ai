@@ -123,14 +123,19 @@ img { max-width: 100%; height: auto; display: block; }
 }
 
 /* ---------- Hero ---------- */
-.hero { padding: 90px 0 40px; text-align: center; overflow: hidden; }
+/* The first screen is only the introduction: exactly one screen tall, content centred. */
+.hero {
+  min-height: calc(100vh - 52px); min-height: calc(100svh - 52px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 40px 0 64px; text-align: center; overflow: hidden;
+}
 .hero-sub { font-size: clamp(19px, 2.3vw, 25px); color: var(--muted); max-width: 760px; margin: 26px auto 0; line-height: 1.35; letter-spacing: -0.02em; }
 .hero-cta { display: flex; gap: 28px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 36px; }
 .hero-note { margin-top: 22px; color: var(--muted); font-size: 15px; display: inline-flex; align-items: center; gap: 8px; }
 .free-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 20%, transparent); }
 
 /* ---------- Demo (animated recreation of ApplyFlow on LinkedIn) ---------- */
-.demo-stage { max-width: 1040px; margin: 64px auto 0; padding: 0 24px; }
+.demo-stage { max-width: 1040px; margin: 56px auto 0; padding: 0 24px; }
 .browser { border-radius: 18px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow); border: 1px solid var(--line); text-align: left; }
 .browser-bar { height: 38px; display: flex; align-items: center; gap: 7px; padding: 0 14px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
 .browser-bar > span { width: 11px; height: 11px; border-radius: 50%; background: var(--line); }
@@ -369,7 +374,7 @@ img { max-width: 100%; height: auto; display: block; }
 @media (max-width: 600px) {
   body { font-size: 16px; }
   .section-title br, .hero-title br { display: none; }
-  .hero { padding-top: 60px; }
+  .hero { padding: 32px 0 48px; }
   .section { padding: 90px 0; }
   .steps-old { grid-template-columns: 1fr; }
   .bento { grid-template-columns: 1fr; }

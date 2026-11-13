@@ -6,6 +6,25 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
+// ---------- Always open at the very top ----------
+// Links like /#faq or a browser's remembered scroll position would otherwise open the
+// page halfway down. The page always starts at the top; the menu links scroll smoothly
+// without putting "#faq" into the address.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+scrollTo(0, 0);
+addEventListener("pageshow", () => scrollTo(0, 0));
+document.addEventListener("click", (event) => {
+  const link = event.target.closest('a[href^="#"]');
+  if (!link) return;
+  const id = link.getAttribute("href").slice(1);
+  const target = id === "top" ? document.body : document.getElementById(id);
+  if (!target) return;
+  event.preventDefault();
+  if (id === "top") scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+  else target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
+});
+
 // ---------- Nav border once you scroll ----------
 const nav = $("#nav");
 const onScroll = () => nav.classList.toggle("scrolled", scrollY > 8);

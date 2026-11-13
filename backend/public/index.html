@@ -24,6 +24,7 @@
       </a>
       <nav class="nav-links" aria-label="Sections">
         <a href="#why">Why</a>
+        <a href="#product">How it works</a>
         <a href="#features">Features</a>
         <a href="#free">Free</a>
         <a href="#setup">Setup</a>
@@ -47,39 +48,6 @@
         <p class="hero-note reveal"><span class="free-dot"></span>Completely free. No card, no trial, no catch.</p>
       </div>
 
-      <!-- Live demo: a LinkedIn-style feed with ApplyFlow working on it -->
-      <div class="demo-stage reveal" aria-label="Animated demo of ApplyFlow on a LinkedIn feed" role="img">
-        <div class="browser">
-          <div class="browser-bar"><span></span><span></span><span></span><div class="url">linkedin.com/feed</div></div>
-          <div class="browser-body">
-            <div class="feed">
-              <div class="post muted-post"><div class="who"><i></i><div><b>Rohan Kapoor</b><small>Engineering Manager · 2h</small></div></div><p>Great talks at this year's developer conference, thanks to everyone who came by!</p><div class="media"></div></div>
-              <div class="post hiring-post" id="demoPost"><div class="who"><i></i><div><b>Ananya Rao</b><small>Talent Partner at Northwind Health · 3h</small></div></div>
-                <p><strong>We're hiring | Product Analyst</strong><br>Location: Pune · Experience: 0–2 years<br>Skills: SQL, Power BI, stakeholder management<br>Share your resume at ananya.rao@northwind.example</p></div>
-              <div class="post muted-post"><div class="who"><i></i><div><b>Meera Joshi</b><small>Product Designer · 5h</small></div></div><p>Some thoughts on staying productive in a hybrid world.</p><div class="media"></div></div>
-            </div>
-
-            <!-- ApplyFlow notification → window -->
-            <div class="af-toast" id="demoToast">
-              <svg class="logo" width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg>
-              <div><small>Hiring post detected</small><b>Product Analyst <span>· Northwind Health</span></b></div>
-              <em>View</em>
-            </div>
-            <div class="af-window" id="demoWindow">
-              <div class="w-head"><svg class="logo" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg><b>ApplyFlow</b></div>
-              <div class="w-body">
-                <div class="tags"><span>✦ Analysed by AI</span><span>Fresher friendly</span></div>
-                <h4>Product Analyst</h4>
-                <p class="w-meta">Northwind Health · Pune</p>
-                <div class="w-resume"><span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15"/><circle class="fill" cx="18" cy="18" r="15"/></svg><b id="demoScore">0</b></span><div><b>Analyst resume</b><small>Best match · SQL, Power BI, dashboards</small></div></div>
-                <div class="w-mail"><small>To ananya.rao@northwind.example</small><p id="demoEmail"></p></div>
-              </div>
-              <div class="w-foot"><div class="w-send" id="demoSend"><span>➤</span> Send application</div></div>
-            </div>
-          </div>
-        </div>
-        <div class="demo-caption" id="demoCaption">Scroll your feed as usual…</div>
-      </div>
     </section>
 
     <!-- ============ THE OLD WAY ============ -->
@@ -118,6 +86,48 @@
             <div><b id="tallyTime">~10</b><small>minutes per job</small></div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ============ THE PRODUCT ============ -->
+    <section class="section soft-band product" id="product">
+      <div class="wrap center">
+        <p class="eyebrow reveal">Meet ApplyFlow</p>
+        <h2 class="section-title reveal">Three clicks.<br><span class="grad">From post to sent.</span></h2>
+        <p class="section-sub reveal">ApplyFlow lives right inside LinkedIn. It notices hiring posts, writes the email for you and sends it from your Gmail. Watch it work:</p>
+      </div>
+      <!-- Live demo: a LinkedIn-style feed with ApplyFlow working on it -->
+      <div class="demo-stage reveal" aria-label="Animated demo of ApplyFlow on a LinkedIn feed" role="img">
+        <div class="browser">
+          <div class="browser-bar"><span></span><span></span><span></span><div class="url">linkedin.com/feed</div></div>
+          <div class="browser-body">
+            <div class="feed">
+              <div class="post muted-post"><div class="who"><i></i><div><b>Rohan Kapoor</b><small>Engineering Manager · 2h</small></div></div><p>Great talks at this year's developer conference, thanks to everyone who came by!</p><div class="media"></div></div>
+              <div class="post hiring-post" id="demoPost"><div class="who"><i></i><div><b>Ananya Rao</b><small>Talent Partner at Northwind Health · 3h</small></div></div>
+                <p><strong>We're hiring | Product Analyst</strong><br>Location: Pune · Experience: 0–2 years<br>Skills: SQL, Power BI, stakeholder management<br>Share your resume at ananya.rao@northwind.example</p></div>
+              <div class="post muted-post"><div class="who"><i></i><div><b>Meera Joshi</b><small>Product Designer · 5h</small></div></div><p>Some thoughts on staying productive in a hybrid world.</p><div class="media"></div></div>
+            </div>
+
+            <!-- ApplyFlow notification → window -->
+            <div class="af-toast" id="demoToast">
+              <svg class="logo" width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg>
+              <div><small>Hiring post detected</small><b>Product Analyst <span>· Northwind Health</span></b></div>
+              <em>View</em>
+            </div>
+            <div class="af-window" id="demoWindow">
+              <div class="w-head"><svg class="logo" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg><b>ApplyFlow</b></div>
+              <div class="w-body">
+                <div class="tags"><span>✦ Analysed by AI</span><span>Fresher friendly</span></div>
+                <h4>Product Analyst</h4>
+                <p class="w-meta">Northwind Health · Pune</p>
+                <div class="w-resume"><span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15"/><circle class="fill" cx="18" cy="18" r="15"/></svg><b id="demoScore">0</b></span><div><b>Analyst resume</b><small>Best match · SQL, Power BI, dashboards</small></div></div>
+                <div class="w-mail"><small>To ananya.rao@northwind.example</small><p id="demoEmail"></p></div>
+              </div>
+              <div class="w-foot"><div class="w-send" id="demoSend"><span>➤</span> Send application</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="demo-caption" id="demoCaption">Scroll your feed as usual…</div>
       </div>
     </section>
 
