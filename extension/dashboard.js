@@ -28,26 +28,33 @@ function showTab(name) {
 $all(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
+// ---------- "Live / Offline" badge ----------
+// Updated by EVERY request this page makes (common.js reports each answer), plus a
+// light check on open, every minute, and when you come back to this tab. A slow or
+// failed check is retried, so the badge can never get stuck on "Checking…".
+function setConnection(state) {
+  const live = state === "live";
+  $("#offlineBanner").classList.toggle("hidden", live);
+  $("#backendDot").className = `badge ${live ? "ok" : "danger"}`;
+  $("#backendText").textContent = live ? "Live" : "Offline";
+}
+window.addEventListener("applyflow:connection", (e) => setConnection(e.detail));
+
 function handleError(error) {
-  if (error.code === "BACKEND_OFFLINE") {
-    $("#offlineBanner").classList.remove("hidden");
-    $("#backendDot").className = "badge danger";
-    $("#backendText").textContent = "Offline";
-  } else {
-    toast(error.message, "error");
-  }
+  if (error.code !== "BACKEND_OFFLINE") toast(error.message, "error"); // offline → badge + banner
 }
 
+let checkTimer = null;
 async function checkBackend() {
+  clearTimeout(checkTimer);
   try {
-    await api("/api/status", { timeout: 12000 }); // the server may need a few seconds to wake up
-    $("#offlineBanner").classList.add("hidden");
-    $("#backendDot").className = "badge ok";
-    $("#backendText").textContent = "Live";
-  } catch (error) {
-    handleError(error);
+    await api("/api/status", { timeout: 15000 }); // the badge updates itself from the answer
+    checkTimer = setTimeout(checkBackend, 60000);
+  } catch {
+    checkTimer = setTimeout(checkBackend, 5000);   // offline or slow: try again soon
   }
 }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkBackend(); });
 
 // ==========================================
 // APPLICATIONS

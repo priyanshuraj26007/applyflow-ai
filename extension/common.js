@@ -4,6 +4,12 @@
 // ==========================================
 const API_BASE = APPLYFLOW_API;
 
+// Every call reports whether the server answered, so a page can show a live
+// "Live / Offline" badge: listen for the "applyflow:connection" event (detail: "live" | "offline").
+function reportConnection(state) {
+  window.dispatchEvent(new CustomEvent("applyflow:connection", { detail: state }));
+}
+
 /** Call the ApplyFlow backend. Throws Error with .code on failure. */
 async function api(path, { method = "GET", body, form, timeout = 30000 } = {}) {
   let response;
@@ -16,12 +22,14 @@ async function api(path, { method = "GET", body, form, timeout = 30000 } = {}) {
     });
   } catch (error) {
     const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+    if (!timedOut) reportConnection("offline");
     throw Object.assign(new Error(timedOut
       ? "The request took too long. The AI may be busy — please try again."
       : "Can't reach the ApplyFlow server. Check your internet connection and try again."),
       { code: timedOut ? "TIMEOUT" : "BACKEND_OFFLINE" });
   }
   const data = await response.json().catch(() => null);
+  if (data) reportConnection("live"); // the server answered (even if with an error message)
   if (!response.ok || !data?.success) {
     throw Object.assign(new Error(data?.error || `Backend error (${response.status}).`),
       { code: data?.errorCode || "BACKEND_ERROR", data, status: response.status });
