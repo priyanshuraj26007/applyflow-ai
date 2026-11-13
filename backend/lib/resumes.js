@@ -84,6 +84,12 @@ export async function extractPdfText(buffer) {
   }
 }
 
+/** linkedin.com/in/<name> found anywhere in the resume text, as a clean https URL. */
+export function linkedinFromText(text) {
+  const m = String(text || "").match(/(?:https?:\/\/)?(?:[a-z]{2,3}\.)?linkedin\.com\/in\/([A-Za-z0-9_%-]{2,100})/i);
+  return m ? `https://www.linkedin.com/in/${m[1]}` : null;
+}
+
 // What the API returns — never includes the full text or the file path.
 export function publicResume(r) {
   return {
@@ -100,7 +106,13 @@ export function publicResume(r) {
     analysisError: r.analysisError || null,
     analysedWith: r.analysedWith || null,
     textLength: r.text?.length || 0,
-    profile: r.profile || null
+    profile: r.profile || null,
+    // Used by Settings to fill in name / phone / LinkedIn for the user.
+    contact: {
+      name: r.profile?.name || null,
+      phone: r.profile?.phone || null,
+      linkedin: linkedinFromText(r.text)
+    }
   };
 }
 

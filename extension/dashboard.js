@@ -436,7 +436,9 @@ window.addEventListener("beforeunload", (e) => {
 
 async function loadSettings() {
   try {
-    const [settingsData, status] = await Promise.all([api("/api/settings"), api("/api/status")]);
+    const [settingsData, status, resumeData] = await Promise.all([
+      api("/api/settings"), api("/api/status"), api("/api/resumes").catch(() => ({ resumes: [] }))
+    ]);
     const s = settingsData.settings;
     aboutMePrompt = settingsData.aboutMePrompt || "";
     defaultSkeleton = settingsData.defaultSkeleton || "";
@@ -447,6 +449,7 @@ async function loadSettings() {
       if (!$("#sSkeleton").value.trim()) $("#sSkeleton").value = defaultSkeleton;
       renderKeys(s.keys || {});
     }
+    setupContactSuggestions(resumeData.resumes || []);
     renderAboutMe(settingsData.aboutMe);
     renderGmail(status.gmail);
     renderModels(status);
@@ -454,6 +457,47 @@ async function loadSettings() {
     handleError(error);
   }
 }
+
+// ---------- Name / phone / LinkedIn from your resume ----------
+// Chrome's autofill can't fill extension pages reliably, so ApplyFlow offers the details
+// it already read from your resumes: as dropdown suggestions on each field, a "Fill from
+// my resume" button, and automatically when the fields are still empty.
+let resumeContact = null;
+
+function setupContactSuggestions(resumes) {
+  const ordered = [...resumes].sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+  const unique = (key) => [...new Set(ordered.map(r => r.contact?.[key]).filter(Boolean))];
+  const lists = { dlName: unique("name"), dlPhone: unique("phone"), dlLinkedin: unique("linkedin") };
+  for (const [id, values] of Object.entries(lists)) {
+    $(`#${id}`).innerHTML = values.map(v => `<option value="${esc(v)}"></option>`).join("");
+  }
+  resumeContact = { name: lists.dlName[0], phone: lists.dlPhone[0], linkedin: lists.dlLinkedin[0] };
+  const any = Object.values(resumeContact).some(Boolean);
+  $("#fillFromResume").classList.toggle("hidden", !any);
+  $("#fillHint").textContent = any ? "" : "Tip: upload your resume and ApplyFlow can fill these in for you.";
+  if (any && !settingsDirty && fillContactFromResume({ onlyEmpty: true })) {
+    $("#fillHint").textContent = "Filled in from your resume. Check it, then press Save.";
+  }
+}
+
+/** Put the resume's details into the fields. Returns true if anything changed. */
+function fillContactFromResume({ onlyEmpty = false } = {}) {
+  if (!resumeContact) return false;
+  let changed = false;
+  for (const [sel, value] of [["#sName", resumeContact.name], ["#sPhone", resumeContact.phone], ["#sLinkedin", resumeContact.linkedin]]) {
+    const el = $(sel);
+    if (!value || (onlyEmpty && el.value.trim()) || el.value === value) continue;
+    el.value = value;
+    changed = true;
+  }
+  if (changed) setDirty(true);
+  return changed;
+}
+
+$("#fillFromResume").addEventListener("click", () => {
+  if (fillContactFromResume()) $("#fillHint").textContent = "Filled in from your resume. Check it, then press Save.";
+  else toast("These already match your resume.");
+});
 
 /** Light refresh: status only, never touches the form fields. */
 async function refreshSettingsStatus() {
@@ -567,7 +611,6 @@ async function saveAllSettings() {
 
 $("#keyForm").addEventListener("submit", (e) => { e.preventDefault(); saveAllSettings(); });
 $("#settingsForm").addEventListener("submit", (e) => { e.preventDefault(); saveAllSettings(); });
-$("#saveBarBtn").addEventListener("click", saveAllSettings);
 
 // ---------- About me (context from the user's own AI) ----------
 let aboutMePrompt = "";

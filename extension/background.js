@@ -108,11 +108,12 @@ async function setCached(postKey, value) {
   }
 }
 
-async function analysePost({ postKey, postText, sourceUrl }) {
+async function analysePost({ postKey, postText, sourceUrl, force = false }) {
   const cached = postKey && await getCached(postKey);
   if (cached) return cached;
 
-  if (postKey && inFlight.has(postKey)) return inFlight.get(postKey);
+  // "Try again" (force) starts a fresh request instead of waiting on a stuck one.
+  if (postKey && inFlight.has(postKey) && !force) return inFlight.get(postKey);
 
   const promise = (async () => {
     const result = await api("/api/analyze-job", {
@@ -134,7 +135,7 @@ async function analysePost({ postKey, postText, sourceUrl }) {
   try {
     return await promise;
   } finally {
-    if (postKey) inFlight.delete(postKey);
+    if (postKey && inFlight.get(postKey) === promise) inFlight.delete(postKey);
   }
 }
 
@@ -148,7 +149,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "ANALYZE_POST") {
     return respond(sendResponse, async () => {
       console.log("ApplyFlow AI: Reading post with the AI...");
-      const result = await analysePost({ postKey: message.postId, postText: message.postText, sourceUrl: message.sourceUrl });
+      const result = await analysePost({ postKey: message.postId, postText: message.postText, sourceUrl: message.sourceUrl, force: !!message.force });
       return result;
     });
   }

@@ -129,6 +129,7 @@
               <div class="row" style="margin-top:12px">
                 <button class="btn primary" type="submit">Save</button>
                 <span class="save-state small muted"></span>
+                <span class="unsaved-note hidden small muted">Unsaved changes</span>
               </div>
               <div id="keyStatus" class="small muted" style="margin-top:8px">
               </div>
@@ -168,12 +169,19 @@
                 <pre id="aboutCompact" class="compact-pre"></pre>
               </details>
             </div>
-            <div class="two">
-              <div><label for="sName">Your name</label><input id="sName" name="senderName" type="text" autocomplete="name" maxlength="120"></div>
-              <div><label for="sPhone">Phone</label><input id="sPhone" name="phone" type="tel" autocomplete="tel" maxlength="40"></div>
+            <!-- Chrome's own autofill doesn't fill extension pages reliably, so suggestions come
+                 from your resume instead (dropdown lists below + the "Fill from my resume" button). -->
+            <div class="label-row" style="margin-top:14px">
+              <span class="small muted" id="fillHint"></span>
+              <button type="button" id="fillFromResume" class="btn small hidden">Fill from my resume</button>
             </div>
+            <div class="two">
+              <div><label for="sName">Your name</label><input id="sName" name="senderName" type="text" autocomplete="off" list="dlName" maxlength="120"></div>
+              <div><label for="sPhone">Phone</label><input id="sPhone" name="phone" type="tel" autocomplete="off" list="dlPhone" maxlength="40"></div>
+            </div>
+            <datalist id="dlName"></datalist><datalist id="dlPhone"></datalist><datalist id="dlLinkedin"></datalist>
             <label for="sLinkedin">LinkedIn profile URL</label>
-            <input id="sLinkedin" name="linkedinUrl" type="url" autocomplete="url" maxlength="300" placeholder="https://www.linkedin.com/in/…">
+            <input id="sLinkedin" name="linkedinUrl" type="url" autocomplete="off" list="dlLinkedin" maxlength="300" placeholder="https://www.linkedin.com/in/…">
             <label for="sSignature">Email signature (optional — overrides the three fields above)</label>
             <textarea id="sSignature" name="signature" rows="3" maxlength="600" placeholder="Leave blank for:&#10;Warm regards,&#10;Your Name | Phone&#10;LinkedIn URL"></textarea>
             <div class="label-row">
@@ -198,12 +206,6 @@
       </div>
     </section>
   </main>
-
-  <!-- Shown while Settings has unsaved changes; saves everything (details, About me and keys). -->
-  <div id="saveBar" class="save-bar unsaved-note hidden" role="status">
-    <span>You have unsaved changes</span>
-    <button class="btn primary small" type="button" id="saveBarBtn">Save</button>
-  </div>
 
   <script src="icons.js"></script>
   <script src="config.js"></script>

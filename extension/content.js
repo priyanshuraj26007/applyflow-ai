@@ -413,6 +413,9 @@ function displayJobFromAi(aiJob, localJob) {
 //    Posts that are only scrolled past never use the AI (saves quota).
 // 4. Drag the window by its header; it remembers where you left it.
 //    Double-click the header to snap it back to the corner.
+// 5. The window shrinks back to the notification when you scroll the feed, click
+//    anywhere outside it, or press Escape. Nothing is lost: reopen it any time.
+// 6. The notification always shows the NEWEST hiring post; ‹ › step back through older ones.
 // Everything lives in one Shadow DOM so LinkedIn's CSS can't break it.
 // Light/dark follows LinkedIn's own theme. Icons come from icons.js (AF_ICONS).
 // This page never talks to the backend directly — every call goes through background.js.
@@ -435,21 +438,31 @@ const DEFAULT_POSITION = { right: 20, top: 64 }; // just below LinkedIn's top ba
   }
 })();
 
-// Promise wrapper around chrome.runtime.sendMessage that never throws.
+// Promise wrapper around chrome.runtime.sendMessage that never throws and never hangs.
+// If ApplyFlow was reloaded/updated while this LinkedIn tab stayed open, this tab's copy
+// can't reach the extension any more: we say so (refresh the page) instead of waiting forever.
+const MESSAGE_TIMEOUT_MS = 80000; // background.js gives up on the server after 65s
 function sendToBackground(message) {
   const reloaded = {
     success: false,
     errorCode: "EXTENSION_RELOADED",
-    error: "ApplyFlow AI was updated. Please refresh this LinkedIn page."
+    error: "ApplyFlow was updated. Please refresh this LinkedIn page (press F5)."
   };
   return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({
+      success: false,
+      errorCode: "NO_REPLY",
+      error: "ApplyFlow didn't get an answer. Try again, or refresh this LinkedIn page."
+    }), MESSAGE_TIMEOUT_MS);
+    const done = (value) => { clearTimeout(timer); resolve(value); };
     try {
+      if (!chrome.runtime?.id) return done(reloaded);   // this tab's copy is orphaned
       chrome.runtime.sendMessage(message, (response) => {
-        if (chrome.runtime.lastError) resolve(reloaded);
-        else resolve(response || { success: false, error: "No response from ApplyFlow AI." });
+        if (chrome.runtime.lastError) done(reloaded);
+        else done(response || { success: false, error: "No response from ApplyFlow AI." });
       });
     } catch {
-      resolve(reloaded);
+      done(reloaded);
     }
   });
 }
@@ -483,6 +496,9 @@ const applyFlowPopup = (() => {
   let confirmTimer = null;
   let position = { ...DEFAULT_POSITION };
   let justOpened = false;     // play the expand animation only once per open
+  let toastAnimated = false;  // the notification drops in once, not on every update
+  let scrollAnchor = 0;       // page scroll position when the window was opened
+  let ignoreScrollUntil = 0;  // our own "View post" scrolling shouldn't close the window
 
   // Restore the position the user dragged the window to last time.
   try {
@@ -553,10 +569,12 @@ const applyFlowPopup = (() => {
     posts.push(post);
 
     if (mode === "panel") {
-      render(); // just refreshes the "1 of N" counter
+      render(); // just refreshes the "1 of N" counter — don't switch posts under the user
       return;
     }
-    if (!userBrowsing || index === -1) index = posts.length - 1;
+    // The notification always shows the newest post; ‹ › go back to older ones.
+    index = posts.length - 1;
+    userBrowsing = false;
     mode = "toast";
     render();
   }
@@ -631,6 +649,7 @@ const applyFlowPopup = (() => {
   function openPanel() {
     mode = "panel";
     justOpened = true;
+    scrollAnchor = window.scrollY;
     const post = current();
     position = clampPosition(position);
     render();
@@ -644,6 +663,23 @@ const applyFlowPopup = (() => {
     render();
   }
 
+  // ---------- Shrink back to the notification ----------
+  // Scrolling the feed, clicking outside the window, or Escape → back to the notification.
+  // (The post, the job summary and any email edits stay exactly as they were.)
+  window.addEventListener("scroll", () => {
+    if (mode !== "panel") return;
+    if (Date.now() < ignoreScrollUntil) { scrollAnchor = window.scrollY; return; }
+    if (Math.abs(window.scrollY - scrollAnchor) > 80) closePanel();
+  }, { passive: true });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (mode === "panel" && host && !event.composedPath().includes(host)) closePanel();
+  }, true);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && mode === "panel") closePanel();
+  }, true);
+
   async function loadContext() {
     const response = await sendToBackground({ type: "GET_CONTEXT" });
     if (response.success) {
@@ -653,16 +689,19 @@ const applyFlowPopup = (() => {
   }
 
   // Step 1 (on open): the AI reads the post → job summary. Runs once per post.
-  async function analysePost(post) {
+  async function analysePost(post, { force = false } = {}) {
     if (post.state !== "detected") return;
     post.state = "analysing";
     post.startedAt = Date.now();
     post.error = null;
+    const attempt = (post.attempt || 0) + 1;
+    post.attempt = attempt;
     render();
 
     const response = await sendToBackground({
-      type: "ANALYZE_POST", postId: post.postId, postText: post.postText, sourceUrl: post.sourceUrl
+      type: "ANALYZE_POST", postId: post.postId, postText: post.postText, sourceUrl: post.sourceUrl, force
     });
+    if (post.attempt !== attempt) return; // the user pressed "Try again" meanwhile
     if (response.success && response.jobData) {
       post.aiJob = response.jobData;
       post.job = displayJobFromAi(response.jobData, post.localJob);
@@ -816,7 +855,7 @@ const applyFlowPopup = (() => {
 
     switch (action) {
       case "open": openPanel(); break;
-      case "close-toast": mode = "hidden"; render(); break;
+      case "close-toast": mode = "hidden"; toastAnimated = false; render(); break;
       case "close-panel": closePanel(); break;
       case "prev":
         if (index > 0) { flushSave(); index--; userBrowsing = true; afterNavigate(); }
@@ -826,6 +865,7 @@ const applyFlowPopup = (() => {
         break;
       case "view":
         if (post?.element?.isConnected) {
+          ignoreScrollUntil = Date.now() + 1500;
           post.element.scrollIntoView({ behavior: "smooth", block: "center" });
           post.element.style.outline = pageIsDark() ? "2px solid #F5F5F7" : "2px solid #0A0A0A";
           post.element.style.outlineOffset = "6px";
@@ -852,7 +892,7 @@ const applyFlowPopup = (() => {
         if (post && post.state !== "analysing") startDraft(post);
         break;
       case "reanalyse":
-        if (post) { post.state = "detected"; analysePost(post); }
+        if (post) { post.state = "detected"; analysePost(post, { force: true }); }
         break;
       case "remove-post":
         if (post) removePost(post.postId);
@@ -914,6 +954,7 @@ const applyFlowPopup = (() => {
 
   function render() {
     if (!posts.length || mode === "hidden") {
+      toastAnimated = false;
       host?.remove();
       host = null;
       stopTicker();
@@ -923,6 +964,7 @@ const applyFlowPopup = (() => {
     const layer = root.querySelector(".layer");
     layer.dataset.theme = pageIsDark() ? "dark" : "light";
     layer.innerHTML = mode === "panel" ? windowHtml() : toastHtml();
+    if (mode === "toast") toastAnimated = true;
     if (mode === "panel") {
       if (!justOpened) root.querySelector(".window")?.classList.add("no-anim");
       justOpened = false;
@@ -950,7 +992,13 @@ const applyFlowPopup = (() => {
     const job = post.job;
     const company = clean(job.companyName);
     const title = clean(job.jobTitle) || "Hiring opportunity";
-    const more = posts.length > 1 ? `<span class="count-pill">${posts.length}</span>` : "";
+    const kicker = posts.length > 1 ? `${posts.length} hiring posts` : "Hiring post detected";
+    const nav = posts.length > 1 ? `
+      <span class="toast-nav">
+        <button class="nav-btn" data-action="prev" ${index === 0 ? "disabled" : ""} aria-label="Older post" title="Older post">${I.chevronLeft(12)}</button>
+        <span class="nav-label">${index + 1}/${posts.length}</span>
+        <button class="nav-btn" data-action="next" ${index === posts.length - 1 ? "disabled" : ""} aria-label="Newer post" title="Newer post">${I.chevronRight(12)}</button>
+      </span>` : "";
 
     let right;
     if (post.state === "analysing") right = `<span class="pill ghost"><span class="spin"></span>Reading</span>`;
@@ -958,11 +1006,11 @@ const applyFlowPopup = (() => {
     else right = `<span class="pill solid">View</span>`;
 
     return `
-      <div class="toast" data-action="open" role="button" tabindex="0" aria-label="Open ApplyFlow">
+      <div class="toast${toastAnimated ? " no-anim" : ""}" data-action="open" role="button" tabindex="0" aria-label="Open ApplyFlow">
         <button class="dismiss" data-action="close-toast" aria-label="Dismiss">${I.close(11)}</button>
         ${I.logo(40)}
         <div class="toast-main">
-          <div class="toast-kicker">Hiring post detected ${more}</div>
+          <div class="toast-kicker">${kicker}${nav}</div>
           <div class="toast-title">${e(title)}${company ? `<span class="at"> · ${e(company)}</span>` : ""}</div>
         </div>
         ${right}
@@ -1030,6 +1078,7 @@ const applyFlowPopup = (() => {
     if (post.state === "analysing" || post.state === "detected") {
       return `
         <div class="loading-line" style="margin-top:14px"><span class="spin"></span>Reading the post<span class="dots"></span> <span class="secs"></span></div>
+        <div class="slow-hint" hidden>Taking longer than usual. <button class="link-btn" data-action="reanalyse">Try again</button></div>
         <div class="skeleton" style="height:14px;width:70%"></div>
         <div class="skeleton" style="height:14px;width:55%"></div>
         <div class="skeleton" style="height:14px;width:62%"></div>`;
@@ -1217,6 +1266,7 @@ const applyFlowPopup = (() => {
     const startedAt = post.draft.status === "loading" ? post.draft.startedAt : post.startedAt;
     const s = Math.round((Date.now() - startedAt) / 1000);
     root.querySelectorAll(".secs").forEach(el => { el.textContent = s > 2 ? `${s}s` : ""; });
+    root.querySelectorAll(".slow-hint").forEach(el => { el.hidden = !(post.state === "analysing" && s >= 15); });
     if (!posts.some(p => p.state === "analysing") && post.draft.status !== "loading") stopTicker();
   }
 
@@ -1326,7 +1376,15 @@ const POPUP_CSS = `
   .toast-title { margin-top: 1px; font-size: 14.5px; font-weight: 600; letter-spacing: -0.015em;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .toast-title .at { color: var(--muted); font-weight: 500; }
-  .count-pill { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); line-height: 16px; }
+  .toast.no-anim { animation: none; }
+  .toast-nav { display: inline-flex; align-items: center; gap: 1px; margin-left: auto; background: var(--surface-3); border-radius: 8px; padding: 1px; }
+  .nav-btn { width: 20px; height: 18px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; padding: 0; }
+  .nav-btn:hover:not(:disabled) { background: var(--surface); color: var(--text); }
+  .nav-btn:disabled { opacity: .35; cursor: default; }
+  .nav-label { font-size: 11px; font-weight: 600; color: var(--text-2); padding: 0 3px; font-variant-numeric: tabular-nums; }
+  .slow-hint { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+  .slow-hint[hidden] { display: none; }
+  .link-btn { border: 0; background: none; padding: 0; color: var(--text); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
   .dismiss {
     position: absolute; top: -7px; left: -7px; width: 22px; height: 22px; border-radius: 50%;
     border: 0.5px solid var(--border); background: var(--surface); color: var(--muted);

@@ -102,3 +102,12 @@ test("per-request cache: reads are cached, writes update the cache, callers can'
   });
   assert.equal(Object.keys(await runAsUser(BOB, () => readJson("doc", {}))).length, 0, "other tester unaffected");
 });
+
+test("Settings autofill: name, phone and LinkedIn come from the resume", async () => {
+  const { publicResume, linkedinFromText } = await import("../lib/resumes.js");
+  assert.equal(linkedinFromText("Find me: in.linkedin.com/in/priyanshu-raj/ thanks"), "https://www.linkedin.com/in/priyanshu-raj");
+  assert.equal(linkedinFromText("no profile link here"), null);
+  const shown = publicResume({ id: "x", text: "linkedin.com/in/abc-123", profile: { name: "Priyanshu", phone: "+91 98" } });
+  assert.deepEqual(shown.contact, { name: "Priyanshu", phone: "+91 98", linkedin: "https://www.linkedin.com/in/abc-123" });
+  assert.equal(shown.text, undefined, "full resume text is still never sent");
+});

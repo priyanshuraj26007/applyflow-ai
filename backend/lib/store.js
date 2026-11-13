@@ -35,6 +35,18 @@ function checkName(name) {
 // ------------------------------------------
 // FILE DRIVER
 // ------------------------------------------
+// Windows briefly locks a file while another read of it is open (EPERM/EBUSY on rename):
+// wait a moment and try again instead of failing the save.
+async function renameWithRetry(from, to) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fs.rename(from, to);
+    } catch (error) {
+      if (!["EPERM", "EBUSY", "EACCES"].includes(error.code) || attempt >= 5) throw error;
+      await new Promise(r => setTimeout(r, 30 * (attempt + 1)));
+    }
+  }
+}
 const fileDriver = {
   dir: (user) => path.join(DATA_DIR, "users", user),
   async read(user, name) {
@@ -52,7 +64,7 @@ const fileDriver = {
     const target = path.join(dir, `${name}.json`);
     const tmp = `${target}.${process.pid}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(value, null, 2), "utf8");
-    await fs.rename(tmp, target);
+    await renameWithRetry(tmp, target);
   },
   async remove(user, name) {
     await fs.unlink(path.join(this.dir(user), `${name}.json`)).catch(() => {});
@@ -70,7 +82,7 @@ const fileDriver = {
     await fs.mkdir(dir, { recursive: true });
     const target = path.join(dir, name);
     await fs.writeFile(`${target}.tmp`, buffer);
-    await fs.rename(`${target}.tmp`, target);
+    await renameWithRetry(`${target}.tmp`, target);
   },
   async removeFile(user, name) {
     await fs.unlink(path.join(this.dir(user), "files", name)).catch(() => {});
