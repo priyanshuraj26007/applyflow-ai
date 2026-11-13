@@ -9,13 +9,17 @@ import path from "node:path";
 
 process.env.APPLYFLOW_DATA_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "applyflow-email-test-"));
 process.env.AI_PROVIDERS = "gemini";
+process.env.GEMINI_API_KEY = "test-key";
 process.env.GEMINI_MODELS_DRAFT = "m-draft";
 process.env.GEMINI_MODELS_SMART = "m-smart";
+process.env.ABOUT_ME_RATE_WAIT_MS = "20";   // wait 20ms (not 25s) after a rate limit
+process.env.GEMINI_RETRY_ROUNDS = "0";
 
 const { _setClientForTests } = await import("../lib/gemini.js");
 const ai = await import("../lib/ai.js");
 const { saveSettings, getSettings } = await import("../lib/settings.js");
 const aboutMe = await import("../lib/about-me.js");
+const { updateJson, readJson } = await import("../lib/store.js");
 
 const EMAIL_TEXT = `Subject: Application for Data Analyst – Test User
 
@@ -150,4 +154,63 @@ test("About me: empty profile → emails use the resume only", async () => {
   const settings = await saveSettings({ aboutMe: "" });
   assert.equal((await aboutMe.aboutMeState(settings)).status, "none");
   assert.equal(await aboutMe.aboutMeForPrompt(settings), null);
+});
+
+test("About me: two saves at once condense only once", async () => {
+  const profile = "I study at NSUT. " + "I know SQL and Python. ".repeat(40);
+  await saveSettings({ aboutMe: profile });
+  await Promise.all([aboutMe.condenseAboutMe(profile.trim()), aboutMe.condenseAboutMe(profile.trim(), { fresh: true })]);
+  const condensePrompts = prompts.filter(p => /FACT SHEET/.test(p.contents));
+  assert.equal(condensePrompts.length, 1, "one AI request, not two");
+  assert.equal((await aboutMe.aboutMeState(await getSettings())).status, "ready");
+});
+
+test("About me: waits and retries when the AI's per-minute limit is hit", async () => {
+  let calls = 0;
+  _setClientForTests({ models: { async generateContent({ contents }) {
+    prompts.push({ contents });
+    if (++calls <= 2) throw Object.assign(new Error("Resource exhausted"), { status: 429 });
+    return { text: "EDUCATION\n" + "- fact ".repeat(80) };
+  } } });
+  const profile = "Rate limited profile. " + "Facts about me. ".repeat(40);
+  await saveSettings({ aboutMe: profile });
+  await aboutMe.condenseAboutMe(profile.trim());
+  assert.equal((await aboutMe.aboutMeState(await getSettings())).status, "ready", "succeeds after waiting");
+});
+
+test("About me: a run that stopped halfway carries on from the finished parts", async () => {
+  const long = Array.from({ length: 3 }, (_, i) => `PART ${i} ` + "detail ".repeat(1500)).join("\n\n");
+  const settings = await saveSettings({ aboutMe: long });
+  const parts = aboutMe.splitProfile(long);
+  assert.ok(parts.length >= 2);
+  // Simulate a server that finished part 1 and then died 5 minutes ago.
+  const crypto = await import("node:crypto");
+  const h = crypto.createHash("sha256").update(long.trim()).digest("hex").slice(0, 16);
+  await updateJson("aboutme", {}, () => ({ value: {
+    sourceHash: h, status: "condensing", parts: ["EDUCATION\n" + "- earlier fact ".repeat(40)],
+    total: parts.length, attempts: 1, updatedAt: new Date(Date.now() - 300000).toISOString()
+  } }));
+  assert.equal((await aboutMe.aboutMeState(settings)).status, "pending", "a dead run counts as pending");
+
+  await aboutMe.ensureCondensed(settings);
+  await new Promise(r => setTimeout(r, 100));
+  const condensePrompts = prompts.filter(p => /FACT SHEET/.test(p.contents));
+  assert.equal(condensePrompts.length, parts.length - 1, "only the unfinished parts are sent");
+  const stored = await readJson("aboutme", {});
+  assert.equal(stored.status, "ready");
+  assert.ok(stored.compact.includes("earlier fact"), "the finished part is kept");
+});
+
+test("About me: a failed run is retried automatically a minute later", async () => {
+  const profile = "Failed earlier. " + "Some facts. ".repeat(40);
+  const settings = await saveSettings({ aboutMe: profile });
+  const crypto = await import("node:crypto");
+  const h = crypto.createHash("sha256").update(profile.trim()).digest("hex").slice(0, 16);
+  await updateJson("aboutme", {}, () => ({ value: {
+    sourceHash: h, status: "failed", error: "rate limit", attempts: 1, updatedAt: new Date(Date.now() - 120000).toISOString()
+  } }));
+  assert.equal((await aboutMe.aboutMeState(settings)).status, "pending");
+  await aboutMe.ensureCondensed(settings);
+  await new Promise(r => setTimeout(r, 100));
+  assert.equal((await readJson("aboutme", {})).status, "ready");
 });

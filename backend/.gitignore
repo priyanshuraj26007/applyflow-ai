@@ -3,3 +3,7 @@ node_modules/
 # Personal data: uploaded resumes, applications, Gmail tokens
 data/
 *.tmp
+
+.vercel
+.env*
+!.env.example

@@ -36,15 +36,16 @@ export class GeminiError extends Error {
 }
 export { GeminiError as AIError };
 
-let ai = null;
-function client() {
-  if (!ai) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new GeminiError("GEMINI_AUTH", "GEMINI_API_KEY is missing in backend/.env.", 401);
-    }
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let testClient = null;
+const clients = new Map(); // one client per API key (each tester has their own)
+function client(apiKey) {
+  if (testClient) return testClient;
+  if (!apiKey) throw new GeminiError("GEMINI_AUTH", "No Gemini API key. Add one in Dashboard → Settings.", 401);
+  if (!clients.has(apiKey)) {
+    if (clients.size > 200) clients.clear();
+    clients.set(apiKey, new GoogleGenAI({ apiKey }));
   }
-  return ai;
+  return clients.get(apiKey);
 }
 
 // Turn a raw SDK error into a short, safe code + message (never includes the key).
@@ -65,9 +66,9 @@ export function classifyGeminiError(error) {
 }
 
 /** One request to one Gemini model. Returns the response text. */
-export async function geminiGenerate({ model, contents, config = {}, signal, timeout }) {
+export async function geminiGenerate({ model, contents, config = {}, signal, timeout, apiKey = process.env.GEMINI_API_KEY }) {
   try {
-    const response = await client().models.generateContent({
+    const response = await client(apiKey).models.generateContent({
       model,
       contents,
       config: { ...config, abortSignal: signal, httpOptions: { timeout } }
@@ -80,5 +81,5 @@ export async function geminiGenerate({ model, contents, config = {}, signal, tim
 
 // Tests can swap in a fake Gemini client.
 export function _setClientForTests(fake) {
-  ai = fake;
+  testClient = fake;
 }

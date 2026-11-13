@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 
 process.env.AI_PROVIDERS = "groq,gemini";
 process.env.GROQ_API_KEY = "test-key";
+process.env.GEMINI_API_KEY = "test-key";
+process.env.APPLYFLOW_DATA_DIR = (await import("node:fs")).mkdtempSync((await import("node:path")).join((await import("node:os")).tmpdir(), "applyflow-ai-test-"));
 process.env.GROQ_MODELS_DRAFT = "g1,g2";
 process.env.GEMINI_MODELS_DRAFT = "m1";
 process.env.AI_HEDGE_MS = "40";

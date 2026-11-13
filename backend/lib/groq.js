@@ -58,7 +58,7 @@ export function toJsonSchema(s) {
 }
 
 export function classifyGroqError(status, message = "") {
-  if (status === 401 || status === 403) return new GeminiError("GEMINI_AUTH", "Groq API key was rejected.", status);
+  if (status === 401 || status === 403) return new GeminiError("GEMINI_AUTH", "Your Groq API key was rejected. Check it in Dashboard → Settings.", status);
   if (status === 404) return new GeminiError("GEMINI_MODEL_UNAVAILABLE", "Groq model is not available for this key.", status);
   if (status === 429) {
     const daily = /per day|TPD|RPD/i.test(message);
@@ -79,9 +79,9 @@ export function classifyGroqError(status, message = "") {
 }
 
 /** One request to one Groq model. Returns the response text (JSON when a schema is given). */
-export async function groqGenerate({ model, contents, config = {}, signal, timeout, tier }) {
-  if (!process.env.GROQ_API_KEY) {
-    throw new GeminiError("GEMINI_AUTH", "GROQ_API_KEY is missing in backend/.env.", 401);
+export async function groqGenerate({ model, contents, config = {}, signal, timeout, tier, apiKey = process.env.GROQ_API_KEY }) {
+  if (!apiKey) {
+    throw new GeminiError("GEMINI_AUTH", "No Groq API key. Add yours in Dashboard → Settings.", 401);
   }
   const schema = config.responseSchema;
   const body = {
@@ -100,7 +100,7 @@ export async function groqGenerate({ model, contents, config = {}, signal, timeo
   try {
     response = await fetchImpl(API_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
     });

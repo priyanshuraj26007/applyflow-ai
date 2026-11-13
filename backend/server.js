@@ -1,7 +1,10 @@
-﻿// ==========================================
-// APPLYFLOW AI — LOCAL BACKEND
 // ==========================================
-// Routes only. The real work lives in ./lib:
+// APPLYFLOW AI — BACKEND (hosted on Vercel, or on your own PC)
+// ==========================================
+// One backend shared by all testers. Every /api request carries the tester's
+// random ID (X-ApplyFlow-User header, made by the extension on install) and only
+// ever touches that tester's data. Routes only — the real work lives in ./lib:
+//   context.js       which tester is making this request + background work
 //   ai-router.js     AI providers (Groq, Gemini), racing, fallbacks, retries
 //   gemini.js/groq.js one request to one provider
 //   ai.js            prompts + validation (job, resume, match, email)
@@ -9,33 +12,33 @@
 //   applications.js  application tracking + duplicate detection
 //   gmail.js         OAuth 2.0 + sending with attachment
 //   settings.js      sender profile + writing preferences
-//   store.js         safe JSON file storage in backend/data
+//   store.js         per-tester storage: Supabase when hosted, files on your PC
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import multer from "multer";
 
-import { callAI, MODEL_TIERS, PROVIDER_ORDER } from "./lib/ai-router.js";
+import { callAI, aiKeys, MODEL_TIERS, PROVIDER_ORDER } from "./lib/ai-router.js";
+import { runAsUser, LOCAL_USER, USER_ID_RE, currentUserId, background } from "./lib/context.js";
+import { USING_SUPABASE } from "./lib/store.js";
 import { analyzeJobPost, matchResumes, writeEmail, draftApplication, normaliseJob, DEFAULT_EMAIL_SKELETON } from "./lib/ai.js";
 import { ABOUT_ME_PROMPT, aboutMeState, ensureCondensed, aboutMeForPrompt } from "./lib/about-me.js";
 import {
   listResumes, getResume, addResume, replaceResumeFile, editResume, deleteResume,
-  analyseAndSave, publicResume, resumeFilePath, MAX_RESUME_BYTES
+  analyseAndSave, publicResume, readResumeFile, MAX_RESUME_BYTES
 } from "./lib/resumes.js";
 import {
   listApplications, getApplication, upsertFromPost, modifyApplication, editApplication,
   deleteApplication, findDuplicates, STATUSES
 } from "./lib/applications.js";
 import * as gmail from "./lib/gmail.js";
-import { getSettings, saveSettings } from "./lib/settings.js";
-
-if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
-  console.error("No AI key found. Add GROQ_API_KEY and/or GEMINI_API_KEY to backend/.env.");
-  process.exit(1);
-}
+import { getSettings, saveSettings, publicSettings } from "./lib/settings.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+// Hosted = running on Vercel (or any server with a public address in PUBLIC_URL).
+const HOSTED = Boolean(process.env.VERCEL || process.env.PUBLIC_URL);
+const PUBLIC_ORIGIN = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).origin : null;
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 // Optional: lock the API to your extension's ID (chrome://extensions → ApplyFlow AI → ID).
 const EXTENSION_ID = (process.env.ALLOWED_EXTENSION_ID || "").trim();
@@ -45,9 +48,9 @@ const EXTENSION_ID = (process.env.ALLOWED_EXTENSION_ID || "").trim();
 // ------------------------------------------
 app.disable("x-powered-by");
 
-// 1. Block DNS-rebinding attacks: only answer requests addressed to this machine.
+// 1. On your PC: block DNS-rebinding attacks — only answer requests addressed to this machine.
 app.use((req, res, next) => {
-  if (!ALLOWED_HOSTS.has(req.headers.host)) {
+  if (!HOSTED && !ALLOWED_HOSTS.has(req.headers.host)) {
     return res.status(403).json({ success: false, errorCode: "BAD_HOST", error: "Forbidden host." });
   }
   next();
@@ -58,6 +61,7 @@ app.use((req, res, next) => {
 function isAllowedOrigin(origin) {
   if (!origin) return true; // PowerShell/curl tests and normal page navigations
   if (origin === `http://127.0.0.1:${PORT}` || origin === `http://localhost:${PORT}`) return true;
+  if (PUBLIC_ORIGIN && origin === PUBLIC_ORIGIN) return true;
   if (origin.startsWith("chrome-extension://")) {
     return !EXTENSION_ID || origin === `chrome-extension://${EXTENSION_ID}`;
   }
@@ -73,16 +77,33 @@ app.use((req, res, next) => {
 app.use(cors({ origin: (origin, cb) => cb(null, isAllowedOrigin(origin)) }));
 app.use(express.json({ limit: "200kb" }));
 
-// 3. Simple in-memory rate limiting for endpoints that spend Gemini quota.
+// 3. Which tester is this? Every /api request runs inside that tester's own data space.
+//    On your PC the header is optional (curl tests use the "local" space).
+app.use("/api", (req, res, next) => {
+  const id = req.headers["x-applyflow-user"];
+  if (id === undefined && !HOSTED) return runAsUser(LOCAL_USER, next);
+  if (typeof id !== "string" || !USER_ID_RE.test(id)) {
+    return res.status(401).json({
+      success: false, errorCode: "NO_USER_ID",
+      error: "This copy of ApplyFlow has no tester ID. Reload the extension in chrome://extensions."
+    });
+  }
+  runAsUser(id, next);
+});
+
+// 4. Simple in-memory rate limiting (per tester) for endpoints that spend AI quota.
 function rateLimit(max, windowMs) {
-  const hits = [];
+  const hitsByUser = new Map();
   return (req, res, next) => {
     const now = Date.now();
-    while (hits.length && now - hits[0] > windowMs) hits.shift();
+    const user = currentUserId();
+    const hits = (hitsByUser.get(user) || []).filter(t => now - t < windowMs);
     if (hits.length >= max) {
       return res.status(429).json({ success: false, errorCode: "LOCAL_RATE_LIMIT", error: "Too many AI requests. Please wait a minute." });
     }
     hits.push(now);
+    hitsByUser.set(user, hits);
+    if (hitsByUser.size > 5000) hitsByUser.clear();
     next();
   };
 }
@@ -98,7 +119,7 @@ const upload = multer({
   }
 });
 const singlePdf = (req, res, next) => upload.single("file")(req, res, (err) => {
-  if (err?.code === "LIMIT_FILE_SIZE") return next(Object.assign(new Error("Resume must be 5 MB or smaller."), { status: 413, code: "FILE_TOO_LARGE" }));
+  if (err?.code === "LIMIT_FILE_SIZE") return next(Object.assign(new Error(`Resume must be ${MAX_RESUME_BYTES / 1024 / 1024} MB or smaller.`), { status: 413, code: "FILE_TOO_LARGE" }));
   next(err);
 });
 
@@ -110,15 +131,16 @@ const isNonEmptyString = (v, min = 1) => typeof v === "string" && v.trim().lengt
 // ------------------------------------------
 // HEALTH + STATUS
 // ------------------------------------------
-app.get("/", (req, res) => {
-  res.json({ success: true, message: "ApplyFlow AI backend is running!" });
-});
+const health = (req, res) => res.json({ success: true, message: "ApplyFlow AI backend is running!" });
+app.get("/", health);         // on Vercel the website (public/index.html) is shown at / instead
+app.get("/health", health);
 
 app.get("/api/status", route(async (req, res) => {
-  const [resumes, applications, gmailStatus] = await Promise.all([listResumes(), listApplications(), gmail.getStatus()]);
+  const [resumes, applications, gmailStatus, keys] = await Promise.all([listResumes(), listApplications(), gmail.getStatus(), aiKeys()]);
   res.json({
     success: true,
     models: MODEL_TIERS,
+    aiKeys: { groq: Boolean(keys.groq), gemini: Boolean(keys.gemini) },
     resumes: resumes.length,
     analysedResumes: resumes.filter(r => r.profile).length,
     applications: applications.length,
@@ -127,9 +149,11 @@ app.get("/api/status", route(async (req, res) => {
   });
 }));
 
+// ?provider=groq|gemini tests just that key (used right after a key is saved).
 app.get("/api/test-gemini", aiLimiter, route(async (req, res) => {
-  console.log("ApplyFlow AI: Sending test request to the AI...");
-  const result = await callAI("fast", "Reply with exactly: ApplyFlow AI connected successfully!");
+  const only = ["groq", "gemini"].includes(req.query.provider) ? req.query.provider : undefined;
+  console.log(`ApplyFlow AI: Sending test request to the AI${only ? ` (${only})` : ""}...`);
+  const result = await callAI("fast", "Reply with exactly: ApplyFlow AI connected successfully!", {}, { only });
   res.json({
     success: true,
     message: result.text,
@@ -323,15 +347,16 @@ const sending = new Set();
 app.post("/api/applications/:id/send", route(async (req, res) => {
   const { to, subject, body, resumeId, confirm, allowDuplicate } = req.body || {};
   const id = req.params.id;
+  const sendKey = `${currentUserId()}:${id}`;
 
   if (confirm !== true) {
     return res.status(400).json({ success: false, errorCode: "NOT_CONFIRMED", error: "Sending requires explicit confirmation." });
   }
-  if (sending.has(id)) {
+  if (sending.has(sendKey)) {
     return res.status(409).json({ success: false, errorCode: "ALREADY_SENDING", error: "This application is already being sent." });
   }
 
-  sending.add(id);
+  sending.add(sendKey);
   try {
     const record = await getApplication(id);
     if (!record) return res.status(404).json({ success: false, error: "Application not found." });
@@ -350,8 +375,7 @@ app.post("/api/applications/:id/send", route(async (req, res) => {
     const resume = await getResume(resumeId);
     if (!resume) return res.status(400).json({ success: false, errorCode: "NO_RESUME", error: "Please choose a resume to attach." });
 
-    const fs = await import("node:fs/promises");
-    const content = await fs.readFile(resumeFilePath(resume));
+    const content = await readResumeFile(resume);
     const filename = resume.originalName || `${resume.label}.pdf`;
 
     const result = await gmail.sendEmail({ to, subject, body, attachment: { filename, content } });
@@ -369,7 +393,7 @@ app.post("/api/applications/:id/send", route(async (req, res) => {
     console.log(`ApplyFlow AI: application sent (${updated.job?.jobTitle || "role"}).`);
     res.json({ success: true, application: updated });
   } finally {
-    sending.delete(id);
+    sending.delete(sendKey);
   }
 }));
 
@@ -388,14 +412,14 @@ app.post("/api/resumes", singlePdf, route(async (req, res) => {
     label: req.body?.label,
     category: req.body?.category
   });
-  analyseAndSave(resume.id).catch(() => {}); // runs in the background; dashboard polls
+  background(analyseAndSave(resume.id)); // runs after the response; dashboard polls
   res.status(201).json({ success: true, resume });
 }));
 
 app.put("/api/resumes/:id/file", singlePdf, route(async (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, errorCode: "NO_FILE", error: "Please choose a PDF file." });
   const resume = await replaceResumeFile(req.params.id, { buffer: req.file.buffer, originalName: req.file.originalname });
-  analyseAndSave(resume.id).catch(() => {});
+  background(analyseAndSave(resume.id));
   res.json({ success: true, resume });
 }));
 
@@ -415,13 +439,14 @@ app.delete("/api/resumes/:id", route(async (req, res) => {
 app.get("/api/resumes/:id/file", route(async (req, res) => {
   const resume = await getResume(req.params.id);
   if (!resume) return res.status(404).json({ success: false, error: "Resume not found." });
+  const content = await readResumeFile(resume);
   res.set({
     "Content-Type": "application/pdf",
     "Content-Disposition": `inline; filename="${(resume.originalName || "resume.pdf").replace(/"/g, "")}"`,
     "X-Content-Type-Options": "nosniff",
     "Cache-Control": "no-store"
   });
-  res.sendFile(resumeFilePath(resume));
+  res.send(content);
 }));
 
 // ------------------------------------------
@@ -430,15 +455,16 @@ app.get("/api/resumes/:id/file", route(async (req, res) => {
 app.get("/api/settings", route(async (req, res) => {
   const settings = await getSettings();
   res.json({
-    success: true, settings,
-    aboutMe: await aboutMeState(settings),
+    success: true, settings: publicSettings(settings),
+    aboutMe: await ensureCondensed(settings), // also resumes a condense that stopped or failed earlier
     aboutMePrompt: ABOUT_ME_PROMPT,
     defaultSkeleton: DEFAULT_EMAIL_SKELETON
   });
 }));
 app.put("/api/settings", route(async (req, res) => {
   const settings = await saveSettings(req.body || {});
-  res.json({ success: true, settings, aboutMe: await ensureCondensed(settings) });
+  const aboutMeSaved = typeof req.body?.aboutMe === "string";
+  res.json({ success: true, settings: publicSettings(settings), aboutMe: await ensureCondensed(settings, { fresh: aboutMeSaved }) });
 }));
 
 // ------------------------------------------
@@ -448,13 +474,10 @@ app.get("/api/gmail/status", route(async (req, res) => {
   res.json({ success: true, ...(await gmail.getStatus()) });
 }));
 
-app.get("/auth/google", (req, res) => {
-  try {
-    res.redirect(gmail.buildAuthUrl());
-  } catch (error) {
-    res.status(error.status || 500).type("html").send(resultPage(false, error.message));
-  }
-});
+// The extension asks for a sign-in link (with its tester ID in the header), then opens it.
+app.post("/api/gmail/connect", route(async (req, res) => {
+  res.json({ success: true, url: await gmail.buildAuthUrl() });
+}));
 
 app.get("/auth/google/callback", async (req, res) => {
   try {
@@ -497,7 +520,7 @@ app.use((error, req, res, next) => {
   const status = Number(error?.status) >= 400 && Number(error?.status) < 600 ? Number(error.status) : 500;
   const code = error?.code && typeof error.code === "string" ? error.code : "SERVER_ERROR";
   // Known errors carry safe, user-friendly messages. Unknown ones are logged, not leaked.
-  const known = status < 500 || code.startsWith("GEMINI") || code.startsWith("GMAIL") || code === "NO_ANALYSED_RESUMES";
+  const known = status < 500 || code.startsWith("GEMINI") || code.startsWith("GMAIL") || code.startsWith("STORAGE") || code === "NO_ANALYSED_RESUMES";
   console.error(`ApplyFlow AI error [${code}] ${req.method} ${req.path}: ${error?.message}`);
   if (!known) console.error(error);
   res.status(status === 500 && code.startsWith("GEMINI") ? 502 : status).json({
@@ -510,8 +533,15 @@ app.use((error, req, res, next) => {
 // ------------------------------------------
 // START
 // ------------------------------------------
+// On Vercel there is no server to start: Vercel imports `app` and runs it per request.
+export default app;
+
+if (!process.env.VERCEL) startLocalServer();
+
+function startLocalServer() {
 const server = app.listen(PORT, "127.0.0.1", () => {
   console.log(`ApplyFlow AI backend running at http://127.0.0.1:${PORT}`);
+  console.log(`Storage: ${USING_SUPABASE ? "Supabase" : "files in backend/data/users"}`);
   console.log(`AI providers: ${PROVIDER_ORDER.join(" → ")}`);
   console.log(`  draft: ${MODEL_TIERS.draft.join(" → ")}`);
   console.log(`  fast:  ${MODEL_TIERS.fast.join(" → ")}`);
@@ -529,3 +559,4 @@ server.on("error", (error) => {
 });
 
 console.log("ApplyFlow AI: Starting server...");
+}

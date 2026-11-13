@@ -1,16 +1,16 @@
 // ==========================================
 // APPLYFLOW AI — shared helpers for extension pages
-// (review.html, dashboard.html, popup.html)
+// (review.html, dashboard.html, popup.html) — load config.js first.
 // ==========================================
-const API_BASE = "http://127.0.0.1:3000";
+const API_BASE = APPLYFLOW_API;
 
-/** Call the local backend. Throws Error with .code on failure. */
+/** Call the ApplyFlow backend. Throws Error with .code on failure. */
 async function api(path, { method = "GET", body, form, timeout = 30000 } = {}) {
   let response;
   try {
     response = await fetch(API_BASE + path, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      headers: await applyflowHeaders(body !== undefined ? { "Content-Type": "application/json" } : {}),
       body: form || (body !== undefined ? JSON.stringify(body) : undefined),
       signal: AbortSignal.timeout(timeout)
     });
@@ -18,7 +18,7 @@ async function api(path, { method = "GET", body, form, timeout = 30000 } = {}) {
     const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
     throw Object.assign(new Error(timedOut
       ? "The request took too long. The AI may be busy — please try again."
-      : "Can't reach the ApplyFlow backend. Start it with: npm.cmd start (inside the backend folder)."),
+      : "Can't reach the ApplyFlow server. Check your internet connection and try again."),
       { code: timedOut ? "TIMEOUT" : "BACKEND_OFFLINE" });
   }
   const data = await response.json().catch(() => null);
@@ -27,6 +27,33 @@ async function api(path, { method = "GET", body, form, timeout = 30000 } = {}) {
       { code: data?.errorCode || "BACKEND_ERROR", data, status: response.status });
   }
   return data;
+}
+
+/** Open a resume PDF in a new tab (a plain link can't carry the tester ID, so fetch it first). */
+async function openResumePdf(resumeId) {
+  const tab = window.open("about:blank", "_blank"); // open now, while the click still counts
+  try {
+    const response = await fetch(`${API_BASE}/api/resumes/${encodeURIComponent(resumeId)}/file`, {
+      headers: await applyflowHeaders()
+    });
+    if (!response.ok) throw new Error("Couldn't load the PDF.");
+    const url = URL.createObjectURL(await response.blob());
+    if (tab) tab.location.href = url; else window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) {
+    tab?.close();
+    toast(error.message || "Couldn't load the PDF.", "error");
+  }
+}
+
+/** Ask the backend for a Google sign-in link for this tester, then open it. */
+async function connectGmail() {
+  try {
+    const { url } = await api("/api/gmail/connect", { method: "POST" });
+    window.open(url, "_blank");
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
 function esc(value) {

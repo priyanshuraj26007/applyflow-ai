@@ -7,7 +7,11 @@
 //   ANALYZE_TEXT          (popup.js)    → manual analysis of selected text
 console.log("ApplyFlow AI: Background service worker started!");
 
-const API = "http://127.0.0.1:3000";
+importScripts("config.js"); // APPLYFLOW_API + tester ID helpers
+const API = APPLYFLOW_API;
+
+// Make the tester ID as soon as the extension is installed.
+chrome.runtime.onInstalled.addListener(() => { applyflowTesterId().catch(() => {}); });
 const ANALYZE_TIMEOUT_MS = 65000; // backend may try several AI models
 const CACHE_LIMIT = 200;
 
@@ -22,7 +26,7 @@ async function api(path, { method = "GET", body, timeout = 20000 } = {}) {
   try {
     response = await fetch(API + path, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: await applyflowHeaders(body ? { "Content-Type": "application/json" } : {}),
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeout)
     });
@@ -31,7 +35,7 @@ async function api(path, { method = "GET", body, timeout = 20000 } = {}) {
     throw Object.assign(
       new Error(timedOut
         ? "The AI is taking too long right now."
-        : "ApplyFlow backend is not running. Start it with: npm.cmd start (in the backend folder)."),
+        : "Can't reach the ApplyFlow server. Check your internet connection and try again."),
       { code: timedOut ? "TIMEOUT" : "BACKEND_OFFLINE" }
     );
   }

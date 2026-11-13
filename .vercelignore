@@ -1,0 +1,14 @@
+# Never upload to Vercel: personal keys and local data (anywhere in the repo).
+**/.env
+**/.env.*
+!**/.env.example
+backend/data/
+_backups/
+**/node_modules/
+backend/supabase/.temp/
+*.log
+*.tmp
+# Only the backend folder is deployed
+extension/
+docs/
+backend/tests/

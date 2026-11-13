@@ -1083,11 +1083,13 @@ const applyFlowPopup = (() => {
 
     if (post.draft.status === "error") {
       const noResumes = post.draft.errorCode === "NO_RESUMES";
+      const noKey = post.draft.errorCode === "NO_AI_KEY";
       return `
         <section class="block">
-          <div class="note ${noResumes ? "" : "danger"}">${I.warning(15)}<span>${e(post.draft.error || "Something went wrong.")}</span></div>
+          <div class="note ${noResumes || noKey ? "" : "danger"}">${I.warning(15)}<span>${e(post.draft.error || "Something went wrong.")}</span></div>
           <div class="row" style="margin-top:12px">
             ${noResumes ? `<button class="btn" data-action="dashboard" data-hash="#resumes">${I.upload(14)}Upload resumes</button>` : ""}
+            ${noKey ? `<button class="btn" data-action="dashboard" data-hash="#settings">Add your AI key</button>` : ""}
             <button class="btn" data-action="retry">${I.refresh(14)}Try again</button>
           </div>
         </section>`;

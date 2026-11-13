@@ -132,7 +132,8 @@ function renderEmail() {
 
   const resumeId = app.resumeId;
   $("#attachName").textContent = resumeId ? (resumes.find(r => r.id === resumeId)?.originalName || resumeLabel(resumeId)) : "No resume selected";
-  $("#attachView").href = resumeId ? `${API_BASE}/api/resumes/${encodeURIComponent(resumeId)}/file` : "#";
+  $("#attachView").href = "#";
+  $("#attachView").onclick = (e) => { e.preventDefault(); if (resumeId) openResumePdf(resumeId); };
   dirty = false;
   $("#saveState").textContent = email.generatedWith ? `Drafted by ${email.generatedWith}` : "";
   if (email.eligibility && !app.sentMessageId) {
@@ -145,10 +146,10 @@ function renderEmail() {
 function renderGmail() {
   const line = $("#gmailLine");
   if (!gmail.configured) {
-    line.innerHTML = `${AF_ICONS.warning(15)}<span>Gmail isn't set up yet. <a href="dashboard.html#settings" target="_blank">Set it up in Settings</a>, or use “Copy text” to send manually.</span>`;
+    line.innerHTML = `${AF_ICONS.warning(15)}<span>Gmail sending isn't switched on yet. Use “Copy text” to send it yourself.</span>`;
   } else if (!gmail.connected) {
     line.innerHTML = `${AF_ICONS.mail(15)}<span class="spacer">Connect Gmail to send directly.</span><button class="btn small primary" id="connectGmail">Connect Gmail</button>`;
-    $("#connectGmail").onclick = () => window.open(`${API_BASE}/auth/google`, "_blank");
+    $("#connectGmail").onclick = connectGmail;
   } else {
     line.innerHTML = `<span class="badge ok"><span class="dot"></span>Gmail</span><span>Sending from <strong>${esc(gmail.email || "your Gmail")}</strong></span>`;
   }
@@ -198,7 +199,10 @@ async function prepare(options = {}) {
     app = data.application;
     showDuplicates(data.duplicates);
   } catch (error) {
-    if (error.code === "NO_RESUMES") {
+    if (error.code === "NO_AI_KEY") {
+      banner(`${esc(error.message)} <a href="dashboard.html#settings" target="_blank">Open Settings →</a>
+              <button class="btn small" id="retryPrepare" style="margin-left:8px">I've added it — retry</button>`, "warn", "prepare");
+    } else if (error.code === "NO_RESUMES") {
       banner(`${esc(error.message)} <a href="dashboard.html#resumes" target="_blank">Open the resume library →</a>
               <button class="btn small" id="retryPrepare" style="margin-left:8px">I've uploaded one — retry</button>`, "warn", "prepare");
     } else {

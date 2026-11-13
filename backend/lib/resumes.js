@@ -1,17 +1,17 @@
 // ==========================================
 // RESUME LIBRARY
 // ==========================================
-// PDFs are stored in backend/data/resumes/<random-id>.pdf (never the user's
-// filename, so no path tricks). Metadata + extracted text + AI profile live
-// in backend/data/resumes.json. AI analysis is cached by file hash.
-import fs from "node:fs/promises";
+// PDFs are stored as <random-id>.pdf in the tester's own storage space (never the
+// user's filename, so no path tricks). Metadata + extracted text + AI profile live
+// in the "resumes" document. AI analysis is cached by file hash. See lib/store.js.
 import path from "node:path";
 import crypto from "node:crypto";
-import { PDFParse } from "pdf-parse";
-import { RESUME_DIR, readJson, updateJson } from "./store.js";
+import { readJson, updateJson, readFile, writeFile, removeFile } from "./store.js";
 import { analyzeResume, JOB_CATEGORIES } from "./ai.js";
 
-export const MAX_RESUME_BYTES = 5 * 1024 * 1024; // 5 MB
+// Vercel rejects request bodies over 4.5 MB, so the hosted limit is 4 MB.
+export const MAX_RESUME_BYTES = (process.env.VERCEL ? 4 : 5) * 1024 * 1024;
+const MAX_MB = MAX_RESUME_BYTES / 1024 / 1024;
 const EMPTY = { resumes: [] };
 
 export class ResumeError extends Error {
@@ -42,7 +42,7 @@ export function assertPdf(buffer) {
     throw new ResumeError("INVALID_FILE", "The uploaded file is empty.");
   }
   if (buffer.length > MAX_RESUME_BYTES) {
-    throw new ResumeError("FILE_TOO_LARGE", "Resume must be 5 MB or smaller.", 413);
+    throw new ResumeError("FILE_TOO_LARGE", `Resume must be ${MAX_MB} MB or smaller.`, 413);
   }
   // Real PDFs start with "%PDF-" (allow a little leading junk, as some generators add it).
   if (!buffer.subarray(0, 1024).toString("latin1").includes("%PDF-")) {
@@ -50,8 +50,24 @@ export function assertPdf(buffer) {
   }
 }
 
+// The PDF reader is loaded only when a resume is uploaded, so a PDF-library problem
+// can never stop the whole server from starting. "pdf-parse/worker" must load first:
+// on Vercel it provides the graphics pieces (DOMMatrix…) that pdf.js expects, and
+// makes Vercel bundle them.
+let pdfLib = null;
+async function loadPdfLib() {
+  if (!pdfLib) {
+    const worker = await import("pdf-parse/worker");
+    const { PDFParse } = await import("pdf-parse");
+    PDFParse.setWorker(worker.getData());
+    pdfLib = { PDFParse, CanvasFactory: worker.CanvasFactory };
+  }
+  return pdfLib;
+}
+
 export async function extractPdfText(buffer) {
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  const { PDFParse, CanvasFactory } = await loadPdfLib();
+  const parser = new PDFParse({ data: new Uint8Array(buffer), CanvasFactory });
   try {
     const result = await parser.getText();
     const text = (result.text || "")
@@ -96,10 +112,17 @@ export async function getResume(id) {
   return (await listResumes()).find(r => r.id === id) || null;
 }
 
-export function resumeFilePath(resume) {
+function resumeFileName(resume) {
   // id is always our own UUID — but double check it can't escape the folder.
   if (!/^[0-9a-f-]{36}$/.test(resume.id)) throw new ResumeError("BAD_ID", "Invalid resume id.");
-  return path.join(RESUME_DIR, `${resume.id}.pdf`);
+  return `${resume.id}.pdf`;
+}
+
+/** The PDF bytes of a resume (Buffer). */
+export async function readResumeFile(resume) {
+  const buffer = await readFile(resumeFileName(resume));
+  if (!buffer) throw new ResumeError("FILE_MISSING", "The resume file is missing. Please upload it again.", 404);
+  return buffer;
 }
 
 /** Run (or reuse cached) Gemini analysis for a resume and save the result. */
@@ -163,7 +186,7 @@ export async function addResume({ buffer, originalName, label, category }) {
     isDefault: false
   };
 
-  await fs.writeFile(resumeFilePath(record), buffer, { flag: "wx" });
+  await writeFile(resumeFileName(record), buffer);
   try {
     await updateJson("resumes", EMPTY, (db) => {
       if (!db.resumes.length) record.isDefault = true; // first resume = default
@@ -171,7 +194,7 @@ export async function addResume({ buffer, originalName, label, category }) {
       return { value: db, result: null };
     });
   } catch (error) {
-    await fs.unlink(resumeFilePath(record)).catch(() => {});
+    await removeFile(resumeFileName(record));
     throw error;
   }
   return publicResume(record);
@@ -183,10 +206,7 @@ export async function replaceResumeFile(id, { buffer, originalName }) {
   if (!existing) throw new ResumeError("NOT_FOUND", "Resume not found.", 404);
   const { text, pages } = await extractPdfText(buffer);
 
-  const target = resumeFilePath(existing);
-  const tmp = `${target}.tmp`;
-  await fs.writeFile(tmp, buffer);
-  await fs.rename(tmp, target);
+  await writeFile(resumeFileName(existing), buffer);
 
   return updateResumeFields(id, {
     originalName: cleanFileName(originalName),
@@ -221,6 +241,6 @@ export async function deleteResume(id) {
     if (r.isDefault && db.resumes.length) db.resumes[0].isDefault = true;
     return { value: db, result: r };
   });
-  await fs.unlink(resumeFilePath(removed)).catch(() => {});
+  await removeFile(resumeFileName(removed));
   return { id };
 }

@@ -21,10 +21,11 @@
     </header>
 
     <div id="offline" class="banner danger hidden small">
-      <span>Backend isn't running. In the <b>backend</b> folder run <code>npm.cmd start</code>.</span>
+      <span>Can't reach the ApplyFlow server. Check your internet connection.</span>
     </div>
 
     <div class="list">
+      <div class="list-row"><span class="k">AI key</span><span class="v" id="stKey">—</span></div>
       <div class="list-row"><span class="k">Gmail</span><span class="v" id="stGmail">—</span></div>
       <div class="list-row"><span class="k">Resumes</span><span class="v" id="stResumes">—</span></div>
       <div class="list-row"><span class="k">Applications</span><span class="v" id="stApps">—</span></div>
@@ -55,10 +56,11 @@
       </div>
     </details>
 
-    <footer class="p-footer">Version 2.4</footer>
+    <footer class="p-footer" id="version">Version</footer>
   </main>
 
   <script src="icons.js"></script>
+  <script src="config.js"></script>
   <script src="common.js"></script>
   <script src="popup.js"></script>
 </body>

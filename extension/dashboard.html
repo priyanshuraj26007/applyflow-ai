@@ -21,8 +21,7 @@
   <main class="page">
     <div id="offlineBanner" class="banner danger hidden">
       <span data-icon="warning"></span>
-      <span>Can't reach the ApplyFlow backend. Open PowerShell in the <code>backend</code> folder and run
-      <code>npm.cmd start</code>, then refresh this page.</span>
+      <span>Can't reach the ApplyFlow server. Check your internet connection, then refresh this page.</span>
     </div>
 
     <!-- ============ APPLICATIONS ============ -->
@@ -96,7 +95,7 @@
           </div>
         </form>
         <p class="muted small" style="margin:10px 0 0">
-          The AI reads each resume once and saves a profile (skills, experience, projects). Files stay on your computer in <code>backend/data</code>.
+          The AI reads each resume once and saves a profile (skills, experience, projects). Files are kept privately for your copy of ApplyFlow only.
         </p>
       </div>
 
@@ -108,9 +107,34 @@
     <!-- ============ SETTINGS ============ -->
     <section id="tab-settings" class="tab-panel hidden">
       <h1 class="section-title">Settings</h1>
-      <p class="section-sub">Your Gmail connection, your details, and how your emails should sound.</p>
+      <p class="section-sub">Your AI key, your Gmail connection, your details, and how your emails should sound.</p>
       <div class="settings-grid">
         <div>
+          <div class="card" id="aiKeyCard">
+            <h2><span data-icon="sparkle"></span>Your AI key</h2>
+            <p class="muted small" style="margin-top:-6px">ApplyFlow uses Groq's free AI with <b>your own key</b>. One-time setup, about 1 minute:</p>
+            <ol class="steps small">
+              <li>Open <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> and sign in (Google sign-in works).</li>
+              <li>Click <b>Create API Key</b>, give it any name, and copy it. It starts with <code>gsk_</code>.</li>
+              <li>Paste it below and press <b>Save</b>. ApplyFlow checks that it works.</li>
+            </ol>
+            <form id="keyForm" autocomplete="off">
+              <label for="kGroq">Groq API key</label>
+              <input id="kGroq" type="password" autocomplete="new-password" spellcheck="false" placeholder="gsk_…">
+              <details style="margin-top:8px">
+                <summary class="small">Optional: Gemini key as a backup</summary>
+                <p class="muted small" style="margin:6px 0">Used only when Groq is busy. Free from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</p>
+                <input id="kGemini" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste your Gemini key">
+              </details>
+              <div class="row" style="margin-top:12px">
+                <button class="btn primary" type="submit">Save</button>
+                <span class="save-state small muted"></span>
+              </div>
+              <div id="keyStatus" class="small muted" style="margin-top:8px">
+              </div>
+            </form>
+          </div>
+
           <div class="card">
             <h2><span data-icon="mail"></span>Gmail</h2>
             <div id="gmailBox"></div>
@@ -135,7 +159,7 @@
               <p class="muted small" style="margin:0 0 8px">ChatGPT, Claude or Gemini already know you from months of chats. Bring that context here so every email sounds like you:</p>
               <ol class="steps small">
                 <li><button type="button" id="copyAboutPrompt" class="btn small">Copy the prompt</button> and paste it into your AI.</li>
-                <li>Paste its answer below, check it, and press <b>Save settings</b>. It stays on this computer.</li>
+                <li>Paste its answer below, check it, and press <b>Save settings</b>.</li>
               </ol>
               <textarea id="sAbout" name="aboutMe" rows="8" maxlength="60000" placeholder="Paste the career profile your AI wrote about you…"></textarea>
               <div class="row" style="margin-top:6px"><span id="aboutStatus" class="small muted"></span></div>
@@ -145,11 +169,11 @@
               </details>
             </div>
             <div class="two">
-              <div><label for="sName">Your name</label><input id="sName" name="senderName" type="text" maxlength="120"></div>
-              <div><label for="sPhone">Phone</label><input id="sPhone" name="phone" type="text" maxlength="40"></div>
+              <div><label for="sName">Your name</label><input id="sName" name="senderName" type="text" autocomplete="name" maxlength="120"></div>
+              <div><label for="sPhone">Phone</label><input id="sPhone" name="phone" type="tel" autocomplete="tel" maxlength="40"></div>
             </div>
             <label for="sLinkedin">LinkedIn profile URL</label>
-            <input id="sLinkedin" name="linkedinUrl" type="url" maxlength="300" placeholder="https://www.linkedin.com/in/…">
+            <input id="sLinkedin" name="linkedinUrl" type="url" autocomplete="url" maxlength="300" placeholder="https://www.linkedin.com/in/…">
             <label for="sSignature">Email signature (optional — overrides the three fields above)</label>
             <textarea id="sSignature" name="signature" rows="3" maxlength="600" placeholder="Leave blank for:&#10;Warm regards,&#10;Your Name | Phone&#10;LinkedIn URL"></textarea>
             <div class="label-row">
@@ -166,7 +190,8 @@
             <textarea id="sFacts" name="candidateNotes" rows="3" maxlength="1000" placeholder="e.g. Notice period: 30 days. Current location: Pune. Open to relocation."></textarea>
             <div class="row" style="margin-top:14px">
               <button class="btn primary" type="submit">Save settings</button>
-              <span id="settingsSaved" class="muted small"></span>
+              <span class="save-state muted small"></span>
+              <span class="unsaved-note hidden muted small">Unsaved changes</span>
             </div>
           </form>
         </div>
@@ -174,7 +199,14 @@
     </section>
   </main>
 
+  <!-- Shown while Settings has unsaved changes; saves everything (details, About me and keys). -->
+  <div id="saveBar" class="save-bar unsaved-note hidden" role="status">
+    <span>You have unsaved changes</span>
+    <button class="btn primary small" type="button" id="saveBarBtn">Save</button>
+  </div>
+
   <script src="icons.js"></script>
+  <script src="config.js"></script>
   <script src="common.js"></script>
   <script src="dashboard.js"></script>
 </body>

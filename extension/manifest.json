@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ApplyFlow AI",
-  "version": "2.4.0",
+  "version": "3.0.0",
   "description": "Your AI-powered job application assistant for LinkedIn hiring posts.",
   "icons": {
     "16": "icons/icon16.png",
@@ -16,6 +16,7 @@
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",
+    "https://applyflow-ai-murex.vercel.app/*",
     "http://127.0.0.1:3000/*"
   ],
   "background": {

@@ -9,6 +9,8 @@ process.env.GEMINI_MODELS_SMART = "s1,s2";
 process.env.GEMINI_RETRY_DELAY_MS = "30";         // retry round after 30ms instead of 2s
 
 process.env.AI_PROVIDERS = "gemini";               // these tests cover the racing engine with one provider
+process.env.GEMINI_API_KEY = "test-key";
+process.env.APPLYFLOW_DATA_DIR = (await import("node:fs")).mkdtempSync((await import("node:path")).join((await import("node:os")).tmpdir(), "applyflow-ai-test-"));
 
 const { _setClientForTests } = await import("../lib/gemini.js");
 const { callAI: callGemini } = await import("../lib/ai-router.js");

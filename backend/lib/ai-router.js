@@ -11,18 +11,35 @@
 //  - If ALL candidates fail for temporary reasons → wait, then one more round.
 import { GeminiError, GEMINI_TIERS, geminiGenerate, geminiTimeout } from "./gemini.js";
 import { GROQ_TIERS, groqGenerate, groqTimeout } from "./groq.js";
+import { requestMemo } from "./context.js";
+import { getSettings } from "./settings.js";
 
 const PROVIDERS = {
   groq: { tiers: GROQ_TIERS, generate: groqGenerate, timeout: groqTimeout, label: (m) => `groq ${m}` },
   gemini: { tiers: GEMINI_TIERS, generate: geminiGenerate, timeout: geminiTimeout, label: (m) => m }
 };
 
-// Order of providers. Default: Groq first when a Groq key exists (fast), Gemini as backup.
-export const PROVIDER_ORDER = (process.env.AI_PROVIDERS || (process.env.GROQ_API_KEY ? "groq,gemini" : "gemini"))
+// Preferred order of providers: Groq first (fast), Gemini as backup.
+// Each call only uses the providers the tester has a key for (see aiKeys).
+export const PROVIDER_ORDER = (process.env.AI_PROVIDERS || "groq,gemini")
   .split(",").map(p => p.trim().toLowerCase()).filter(p => PROVIDERS[p]);
 
-const candidatesFor = (tier) => PROVIDER_ORDER.flatMap(provider =>
+const candidatesFor = (tier, providers = PROVIDER_ORDER) => providers.flatMap(provider =>
   (PROVIDERS[provider].tiers[tier] || []).map(model => ({ provider, model })));
+
+/**
+ * The AI keys for this request: the tester's own keys from Settings, else the
+ * server's .env keys (only set when running on your own PC — never on Vercel).
+ */
+export function aiKeys() {
+  return requestMemo("aiKeys", async () => {
+    const settings = await getSettings();
+    return {
+      groq: settings.groqApiKey || process.env.GROQ_API_KEY || "",
+      gemini: settings.geminiApiKey || process.env.GEMINI_API_KEY || ""
+    };
+  });
+}
 
 /** Human-readable candidate list per tier (status page + startup log). */
 export const MODEL_TIERS = Object.fromEntries(["fast", "smart", "draft", "match"].map(tier =>
@@ -42,14 +59,21 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
  * Call the AI for a tier. Returns { text, model, provider, durationMs }.
  * `config` may include responseMimeType + responseSchema (Gemini-style schema).
  */
-export async function callAI(tier, contents, config = {}) {
-  let candidates = candidatesFor(tier);
+export async function callAI(tier, contents, config = {}, { only } = {}) {
+  const keys = await aiKeys();
+  const providers = (only ? [only] : PROVIDER_ORDER).filter(p => PROVIDERS[p] && keys[p]);
+  if (!providers.length) {
+    throw new GeminiError("NO_AI_KEY", only
+      ? `No ${only === "gemini" ? "Gemini" : "Groq"} key saved yet.`
+      : "Add your free Groq API key in ApplyFlow → Dashboard → Settings first.", 400);
+  }
+  let candidates = candidatesFor(tier, providers);
   const deadProviders = new Set();           // rejected API key → skip for this call
   const callStart = Date.now();
   const totalRounds = 1 + RETRY_ROUNDS;
 
   for (let round = 1; ; round++) {
-    const pass = await runPass(tier, candidates, deadProviders, contents, config, callStart);
+    const pass = await runPass(tier, candidates, deadProviders, contents, config, callStart, keys);
     if (pass.result) return pass.result;
 
     let error = pass.lastError || new GeminiError("GEMINI_ERROR", "No AI models configured.", 500);
@@ -57,7 +81,7 @@ export async function callAI(tier, contents, config = {}) {
     candidates = candidates.filter(c => !pass.unavailable.has(c) && !deadProviders.has(c.provider));
     const left = RETRY_BUDGET_MS - (Date.now() - callStart) - RETRY_DELAY_MS;
     if (!pass.transient || round >= totalRounds || candidates.length === 0 || left < MIN_ROUND_MS) {
-      if (TRANSIENT_CODES.has(error.code) && PROVIDER_ORDER.length > 1) {
+      if (TRANSIENT_CODES.has(error.code) && providers.length > 1) {
         error = new GeminiError(error.code, "The AI is busy right now (all providers tried). Please try again in a minute.", error.status);
       }
       throw error;
@@ -71,7 +95,7 @@ export async function callAI(tier, contents, config = {}) {
 }
 
 /** One pass through the candidates. Resolves { result } or { lastError, transient, unavailable }. */
-function runPass(tier, candidates, deadProviders, contents, config, callStart) {
+function runPass(tier, candidates, deadProviders, contents, config, callStart, keys) {
   const hedge = HEDGED_TIERS.has(tier);
 
   return new Promise((resolve) => {
@@ -124,7 +148,7 @@ function runPass(tier, candidates, deadProviders, contents, config, callStart) {
         : null;
 
       Promise.resolve()
-        .then(() => p.generate({ model, contents, config, signal: controller.signal, timeout: p.timeout(tier), tier }))
+        .then(() => p.generate({ model, contents, config, signal: controller.signal, timeout: p.timeout(tier), tier, apiKey: keys[provider] }))
         .then((text) => {
           clearTimeout(hedgeTimer);
           controllers.delete(controller);

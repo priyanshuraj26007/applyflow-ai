@@ -40,7 +40,7 @@ function handleError(error) {
 
 async function checkBackend() {
   try {
-    await api("/api/status", { timeout: 5000 });
+    await api("/api/status", { timeout: 12000 }); // the server may need a few seconds to wake up
     $("#offlineBanner").classList.add("hidden");
     $("#backendDot").className = "badge ok";
     $("#backendText").textContent = "Live";
@@ -245,7 +245,7 @@ function renderResumes() {
           </div>` : ""}
 
         <div class="resume-actions">
-          <a class="btn small" href="${API_BASE}/api/resumes/${encodeURIComponent(r.id)}/file" target="_blank">View PDF</a>
+          <button class="btn small" data-action="view">View PDF</button>
           ${r.isDefault ? "" : `<button class="btn small" data-action="default">Set as default</button>`}
           <button class="btn small" data-action="replace">Replace PDF</button>
           <button class="btn small" data-action="reanalyse">Re-analyse</button>
@@ -283,6 +283,8 @@ $("#resumeList").addEventListener("click", async (e) => {
   const r = resumes.find(x => x.id === id);
 
   if (action === "default") patchResume(id, { isDefault: true }, `${r.label} is now your default resume.`);
+
+  if (action === "view") openResumePdf(id);
 
   if (action === "replace") {
     replaceTarget = id;
@@ -417,48 +419,72 @@ $("#migrateBtn").addEventListener("click", async () => {
 // ==========================================
 // SETTINGS
 // ==========================================
+// Rule: never overwrite what the user is typing. The fields are filled from the server
+// only when there are no unsaved changes. Coming back to this tab (or picking a Chrome
+// autofill suggestion) only refreshes the Gmail and About me status.
+let settingsDirty = false;
+
+function setDirty(dirty) {
+  settingsDirty = dirty;
+  $all(".unsaved-note").forEach(el => el.classList.toggle("hidden", !dirty));
+}
+// "input" also fires for Chrome autofill and paste.
+["#settingsForm", "#keyForm"].forEach(sel => $(sel).addEventListener("input", () => setDirty(true)));
+window.addEventListener("beforeunload", (e) => {
+  if (settingsDirty) { e.preventDefault(); e.returnValue = ""; }
+});
+
 async function loadSettings() {
   try {
     const [settingsData, status] = await Promise.all([api("/api/settings"), api("/api/status")]);
     const s = settingsData.settings;
-    for (const el of $("#settingsForm").elements) {
-      if (el.name && s[el.name] !== undefined) el.value = s[el.name];
-    }
     aboutMePrompt = settingsData.aboutMePrompt || "";
     defaultSkeleton = settingsData.defaultSkeleton || "";
-    if (!$("#sSkeleton").value.trim()) $("#sSkeleton").value = defaultSkeleton;
+    if (!settingsDirty) {
+      for (const el of $("#settingsForm").elements) {
+        if (el.name && s[el.name] !== undefined) el.value = s[el.name];
+      }
+      if (!$("#sSkeleton").value.trim()) $("#sSkeleton").value = defaultSkeleton;
+      renderKeys(s.keys || {});
+    }
     renderAboutMe(settingsData.aboutMe);
     renderGmail(status.gmail);
-    $("#geminiInfo").innerHTML = `
-      <dt>Draft models</dt><dd>${esc((status.models.draft || []).join(" → "))}</dd>
-      <dt>Fast models</dt><dd>${esc(status.models.fast.join(" → "))}</dd>
-      <dt>Smart models</dt><dd>${esc(status.models.smart.join(" → "))}</dd>
-      <dt>Resumes analysed</dt><dd>${status.analysedResumes} of ${status.resumes}</dd>`;
+    renderModels(status);
   } catch (error) {
     handleError(error);
   }
+}
+
+/** Light refresh: status only, never touches the form fields. */
+async function refreshSettingsStatus() {
+  try {
+    const [settingsData, status] = await Promise.all([api("/api/settings"), api("/api/status")]);
+    renderAboutMe(settingsData.aboutMe);
+    renderGmail(status.gmail);
+    renderModels(status);
+    if (!settingsDirty) renderKeys(settingsData.settings.keys || {});
+  } catch { /* offline is reported by checkBackend */ }
+}
+
+function renderModels(status) {
+  $("#geminiInfo").innerHTML = `
+    <dt>Draft models</dt><dd>${esc((status.models.draft || []).join(" → "))}</dd>
+    <dt>Fast models</dt><dd>${esc(status.models.fast.join(" → "))}</dd>
+    <dt>Smart models</dt><dd>${esc(status.models.smart.join(" → "))}</dd>
+    <dt>Resumes analysed</dt><dd>${status.analysedResumes} of ${status.resumes}</dd>`;
 }
 
 function renderGmail(g) {
   const box = $("#gmailBox");
   if (!g.configured) {
     box.innerHTML = `
-      <div class="banner warn" style="margin-bottom:8px">Gmail isn't set up yet. One-time setup (about 10 minutes):</div>
-      <ol class="steps">
-        <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> and create a project (e.g. “ApplyFlow AI”).</li>
-        <li><b>APIs & Services → Library</b> → enable <b>Gmail API</b>.</li>
-        <li><b>OAuth consent screen</b> → External → fill app name + your email → add yourself under <b>Test users</b>.</li>
-        <li><b>Credentials → Create credentials → OAuth client ID</b> → type <b>Desktop app</b>.</li>
-        <li>Copy the Client ID and Client secret into <code>backend/.env</code>:<br>
-          <code>GOOGLE_CLIENT_ID=…</code><br><code>GOOGLE_CLIENT_SECRET=…</code></li>
-        <li>Restart the backend, then refresh this page.</li>
-      </ol>
-      <p class="muted small">Full guide: README.md in the project folder.</p>`;
+      <div class="banner warn">Gmail sending isn't switched on for this ApplyFlow server yet. You can still copy each email and send it yourself.</div>`;
   } else if (!g.connected) {
     box.innerHTML = `
       <p style="margin-top:0">Connect the Gmail account you apply from. ApplyFlow only asks for permission to <b>send</b> email — it can't read your inbox, and your password is never shared.</p>
+      <p class="muted small">ApplyFlow is in testing, so your Gmail address must first be added as a tester. Send it to the person who invited you. Google will then say <i>“Google hasn't verified this app”</i>: click <b>Continue</b>.</p>
       <button class="btn primary" id="gmailConnect">Connect Gmail</button>`;
-    $("#gmailConnect").onclick = () => window.open(`${API_BASE}/auth/google`, "_blank");
+    $("#gmailConnect").onclick = connectGmail;
   } else {
     box.innerHTML = `
       <p style="margin-top:0" class="row"><span class="badge ok"><span class="dot"></span>Connected</span><strong>${esc(g.email || "your Gmail account")}</strong></p>
@@ -468,13 +494,80 @@ function renderGmail(g) {
       try {
         await api("/api/gmail/disconnect", { method: "POST" });
         toast("Gmail disconnected.");
-        loadSettings();
+        refreshSettingsStatus();
       } catch (error) {
         handleError(error);
       }
     };
   }
 }
+
+// ---------- The tester's own AI keys ----------
+function renderKeys(keys) {
+  $("#kGroq").value = "";
+  $("#kGemini").value = "";
+  $("#kGroq").placeholder = keys.groq ? `Saved: ${keys.groq} (paste a new key to replace it)` : "gsk_…";
+  $("#kGemini").placeholder = keys.gemini ? `Saved: ${keys.gemini} (paste a new key to replace it)` : "Paste your Gemini key";
+  if (!$("#keyStatus").dataset.result) {
+    $("#keyStatus").textContent = keys.groq ? "✓ Groq key saved" : "No key yet: ApplyFlow can't use AI until you add one.";
+  }
+  $("#aiKeyCard").classList.toggle("needs-key", !keys.groq);
+}
+
+/** One tiny AI request with just that provider's key. */
+async function testKey(provider) {
+  const name = provider === "groq" ? "Groq" : "Gemini";
+  try {
+    const r = await api(`/api/test-gemini?provider=${provider}`, { timeout: 70000 });
+    return `✓ ${name} key works (replied in ${r.responseTime})`;
+  } catch (error) {
+    return `✗ ${name}: ${error.message}`;
+  }
+}
+
+// ---------- One save for everything ----------
+let saving = false;
+async function saveAllSettings() {
+  if (saving) return;
+  saving = true;
+  const body = {};
+  for (const el of $("#settingsForm").elements) if (el.name) body[el.name] = el.value;
+  // Store an unchanged default skeleton as "" so future improvements to the default apply.
+  if (body.emailSkeleton?.trim() === defaultSkeleton.trim()) body.emailSkeleton = "";
+  const newKeys = [];
+  if ($("#kGroq").value.trim()) { body.groqApiKey = $("#kGroq").value.trim(); newKeys.push("groq"); }
+  if ($("#kGemini").value.trim()) { body.geminiApiKey = $("#kGemini").value.trim(); newKeys.push("gemini"); }
+
+  $all(".save-state").forEach(el => { el.innerHTML = `<span class="spinner"></span> Saving…`; });
+  try {
+    const saved = await api("/api/settings", { method: "PUT", body });
+    setDirty(false);
+    delete $("#keyStatus").dataset.result;
+    renderKeys(saved.settings.keys || {});
+    renderAboutMe(saved.aboutMe);
+    $all(".save-state").forEach(el => { el.textContent = "✓ Saved"; });
+    setTimeout(() => $all(".save-state").forEach(el => { if (el.textContent === "✓ Saved") el.textContent = ""; }), 3000);
+    if (newKeys.length) {
+      $("#keyStatus").innerHTML = `<span class="spinner"></span> Checking your key${newKeys.length > 1 ? "s" : ""}…`;
+      const results = await Promise.all(newKeys.map(testKey));
+      $("#keyStatus").dataset.result = "1";
+      $("#keyStatus").innerHTML = results.map(esc).join("<br>");
+    }
+  } catch (error) {
+    $all(".save-state").forEach(el => { el.textContent = ""; });
+    if (error.code === "BAD_API_KEY") {
+      $("#keyStatus").dataset.result = "1";
+      $("#keyStatus").textContent = error.message;
+    }
+    handleError(error);
+  } finally {
+    saving = false;
+  }
+}
+
+$("#keyForm").addEventListener("submit", (e) => { e.preventDefault(); saveAllSettings(); });
+$("#settingsForm").addEventListener("submit", (e) => { e.preventDefault(); saveAllSettings(); });
+$("#saveBarBtn").addEventListener("click", saveAllSettings);
 
 // ---------- About me (context from the user's own AI) ----------
 let aboutMePrompt = "";
@@ -489,14 +582,17 @@ function renderAboutMe(state) {
   if (!state || state.status === "none") {
     status.textContent = "Not added yet — emails will use your resume only.";
   } else if (state.status === "condensing" || state.status === "pending") {
-    status.innerHTML = `<span class="spinner"></span> Condensing your profile into a short fact sheet…`;
-    aboutPollTimer = setTimeout(refreshAboutMe, 3000);
+    const p = state.progress;
+    const step = p?.total > 1 ? ` (part ${Math.min(p.done + 1, p.total)} of ${p.total})` : "";
+    status.innerHTML = `<span class="spinner"></span> Condensing your profile into a short fact sheet${step}… ` +
+      `<span class="muted">Long profiles can take a few minutes. You can leave this page; it keeps going.</span>`;
+    aboutPollTimer = setTimeout(refreshAboutMe, 4000);
   } else if (state.status === "ready") {
     status.textContent = `✓ Ready — condensed from ${state.sourceWords} to ${state.words} words. Every email now uses it.`;
     $("#aboutCompact").textContent = state.compact || "";
     box.classList.remove("hidden");
   } else if (state.status === "failed") {
-    status.textContent = `Couldn't condense it (${state.error || "AI busy"}). Emails will use the full text — press Save to try again.`;
+    status.textContent = `Couldn't condense it yet (${state.error || "AI busy"}). Emails still use your full profile. Press Save to try again.`;
   }
 }
 
@@ -517,23 +613,8 @@ $("#copyAboutPrompt").addEventListener("click", async () => {
 
 $("#resetSkeleton").addEventListener("click", () => {
   $("#sSkeleton").value = defaultSkeleton;
-  toast("Skeleton reset — press Save settings to keep it.");
-});
-
-$("#settingsForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const body = {};
-  for (const el of $("#settingsForm").elements) if (el.name) body[el.name] = el.value;
-  // Store an unchanged default skeleton as "" so future improvements to the default apply.
-  if (body.emailSkeleton?.trim() === defaultSkeleton.trim()) body.emailSkeleton = "";
-  try {
-    const saved = await api("/api/settings", { method: "PUT", body });
-    renderAboutMe(saved.aboutMe);
-    $("#settingsSaved").textContent = "Saved";
-    setTimeout(() => { $("#settingsSaved").textContent = ""; }, 2500);
-  } catch (error) {
-    handleError(error);
-  }
+  setDirty(true);
+  toast("Skeleton reset — press Save to keep it.");
 });
 
 $("#testGemini").addEventListener("click", async () => {
@@ -547,9 +628,9 @@ $("#testGemini").addEventListener("click", async () => {
   }
 });
 
-// Returning from the Google sign-in tab → refresh Gmail status.
+// Back from another tab (e.g. Google sign-in or ChatGPT) → refresh status only.
 window.addEventListener("focus", () => {
-  if (!$("#tab-settings").classList.contains("hidden")) loadSettings();
+  if (!$("#tab-settings").classList.contains("hidden")) refreshSettingsStatus();
 });
 
 // ------------------------------------------

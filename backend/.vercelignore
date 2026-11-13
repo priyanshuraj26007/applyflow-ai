@@ -1,0 +1,14 @@
+# Never upload to Vercel: your personal keys and local data.
+.env
+.env.*
+!.env.example
+data/
+_backups/
+node_modules/
+supabase/.temp/
+supabase/.branches/
+*.log
+*.tmp
+# Not needed to run the server
+tests/
+test-*.js

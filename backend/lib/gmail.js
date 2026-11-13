@@ -1,13 +1,21 @@
 // ==========================================
 // GMAIL — OAUTH 2.0 + SENDING
 // ==========================================
-// Uses a Google Cloud "Desktop app" OAuth client with a loopback redirect
-// (http://127.0.0.1:<PORT>/auth/google/callback), PKCE and a CSRF `state`.
-// We request only: gmail.send (send mail) + openid/email (show which account).
-// We never see or store the user's Google password. The refresh token is
-// stored locally in backend/data/gmail-tokens.json (git-ignored).
+// OAuth client types (Google Cloud → Credentials):
+//  - Hosted (PUBLIC_URL set, e.g. on Vercel): a "Web application" client whose
+//    redirect URI is <PUBLIC_URL>/auth/google/callback.
+//  - On your own PC: a "Desktop app" client, redirect http://127.0.0.1:<PORT>/auth/google/callback.
+// PKCE + a random one-time `state`. We request only: gmail.send (send mail) +
+// openid/email (show which account). We never see the user's Google password.
+// Each tester's refresh token lives in THEIR "gmail-tokens" document (lib/store.js).
+//
+// Sign-in flow (hosted): the extension calls POST /api/gmail/connect with its tester ID
+// → we remember { state → tester, verifier } in the shared "_oauth" space → the
+// extension opens Google's page → Google redirects to /auth/google/callback?state=…
+// (no tester ID in any URL) → we look up the tester by `state` and save their tokens.
 import crypto from "node:crypto";
-import { readJson, updateJson } from "./store.js";
+import { readJson, updateJson, deleteJson } from "./store.js";
+import { currentUserId, runAsUser } from "./context.js";
 
 const SCOPES = ["openid", "email", "https://www.googleapis.com/auth/gmail.send"];
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -23,13 +31,14 @@ export class GmailError extends Error {
   }
 }
 
-const pending = new Map(); // state -> { verifier, createdAt }
+const OAUTH_SPACE = { user: "_oauth" };
+const STATE_TTL_MS = 10 * 60 * 1000; // sign-in links expire after 10 minutes
 
 function config() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const port = process.env.PORT || 3000;
-  return { clientId, clientSecret, redirectUri: `http://127.0.0.1:${port}/auth/google/callback` };
+  const base = (process.env.PUBLIC_URL || `http://127.0.0.1:${process.env.PORT || 3000}`).replace(/\/+$/, "");
+  return { clientId, clientSecret, redirectUri: `${base}/auth/google/callback` };
 }
 
 export function isConfigured() {
@@ -46,20 +55,20 @@ export async function getStatus() {
   };
 }
 
-/** Step 1: build Google's consent URL. */
-export function buildAuthUrl() {
+/** Step 1: remember who is signing in, then build Google's consent URL. */
+export async function buildAuthUrl() {
   if (!isConfigured()) {
     throw new GmailError("GMAIL_NOT_CONFIGURED",
-      "Gmail is not set up yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to backend/.env (see README).", 400);
+      "Gmail sending is not set up on the ApplyFlow server yet (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).", 400);
   }
   const { clientId, redirectUri } = config();
   const state = crypto.randomBytes(24).toString("base64url");
   const verifier = crypto.randomBytes(48).toString("base64url");
   const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
 
-  // Forget abandoned logins after 10 minutes.
-  for (const [k, v] of pending) if (Date.now() - v.createdAt > 600000) pending.delete(k);
-  pending.set(state, { verifier, createdAt: Date.now() });
+  await updateJson(`state-${state}`, null, () => ({
+    value: { user: currentUserId(), verifier, createdAt: Date.now() }, result: null
+  }), OAUTH_SPACE);
 
   const params = new URLSearchParams({
     client_id: clientId,
@@ -106,14 +115,21 @@ async function tokenRequest(params) {
 /** Step 2: Google redirects back with ?code&state — exchange for tokens. */
 export async function handleCallback({ code, state, error }) {
   if (error) throw new GmailError("GMAIL_DENIED", `Google sign-in was cancelled (${error}).`);
-  const entry = state && pending.get(state);
-  if (!entry || !code) throw new GmailError("GMAIL_BAD_STATE", "This sign-in link is invalid or expired. Please try connecting again.");
-  pending.delete(state);
+  const validState = typeof state === "string" && /^[A-Za-z0-9_-]{20,64}$/.test(state);
+  const entry = validState ? await readJson(`state-${state}`, null, OAUTH_SPACE) : null;
+  if (validState) await deleteJson(`state-${state}`, OAUTH_SPACE);   // one use only
+  if (!entry || !code || Date.now() - entry.createdAt > STATE_TTL_MS) {
+    throw new GmailError("GMAIL_BAD_STATE", "This sign-in link is invalid or expired. Please try connecting again.");
+  }
+  // Save the tokens into the space of the tester who started this sign-in.
+  return runAsUser(entry.user, () => finishSignIn(code, entry.verifier));
+}
 
+async function finishSignIn(code, verifier) {
   const { clientId, clientSecret, redirectUri } = config();
   const data = await tokenRequest({
     code, client_id: clientId, client_secret: clientSecret,
-    redirect_uri: redirectUri, grant_type: "authorization_code", code_verifier: entry.verifier
+    redirect_uri: redirectUri, grant_type: "authorization_code", code_verifier: verifier
   });
 
   if (!String(data.scope || "").includes("gmail.send")) {
@@ -198,7 +214,7 @@ export function textToHtml(body) {
     return `<p style="margin:0 0 14px 0">${safe}</p>`;
   }).join("\n");
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="margin:0;padding:0">
-<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1f2937;max-width:640px">
+<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1f2937">
 ${html}
 </div></body></html>`;
 }

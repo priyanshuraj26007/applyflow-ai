@@ -22,9 +22,10 @@ $("#chevIcon").innerHTML = AF_ICONS.chevronRight(14);
 
 async function loadStatus() {
   try {
-    const s = await api("/api/status", { timeout: 4000 });
+    const s = await api("/api/status", { timeout: 12000 }); // the server may need a few seconds to wake up
     $("#liveBadge").className = "badge ok";
     $("#liveText").textContent = "Live";
+    $("#stKey").textContent = s.aiKeys?.groq || s.aiKeys?.gemini ? "Added" : "Not added: open Settings";
     $("#stGmail").textContent = s.gmail.connected ? "Connected" : (s.gmail.configured ? "Not connected" : "Not set up");
     $("#stResumes").textContent = s.resumes
       ? (s.analysedResumes === s.resumes ? `${s.resumes} ready` : `${s.analysedResumes} of ${s.resumes} ready`)
@@ -145,3 +146,6 @@ $("#reviewBtn").addEventListener("click", () => {
 });
 
 loadStatus();
+
+// Show the real version from manifest.json.
+try { document.getElementById("version").textContent = `Version ${chrome.runtime.getManifest().version}`; } catch { /* outside Chrome */ }
