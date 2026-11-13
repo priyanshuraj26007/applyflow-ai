@@ -96,6 +96,11 @@ const TABLE = "applyflow_kv";
 const BUCKET = "resumes";
 let supabase = null;
 
+/** The shared Supabase client (hosted mode only). */
+export async function supabaseClient() {
+  return db();
+}
+
 async function db() {
   if (!supabase) {
     const { createClient } = await import("@supabase/supabase-js");

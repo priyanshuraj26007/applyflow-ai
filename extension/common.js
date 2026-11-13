@@ -123,7 +123,7 @@ function confirmDialog({ title, html, confirmText = "Confirm", danger = false })
 }
 
 const STATUS_STYLE = {
-  "Detected": "", "Analysed": "", "Ready to Apply": "warn", "Applied": "ok",
+  "Detected": "", "Analysed": "", "Ready to Apply": "warn", "Scheduled": "", "Applied": "ok",
   "Interview": "ok", "Rejected": "danger", "No Response": ""
 };
 function statusBadge(status) {

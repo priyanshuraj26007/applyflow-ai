@@ -51,7 +51,8 @@ export async function getStatus() {
   return {
     configured: isConfigured(),
     connected: Boolean(tokens?.refresh_token),
-    email: tokens?.email || null
+    email: tokens?.email || null,
+    connectedAt: tokens?.refresh_token ? tokens.connectedAt || null : null
   };
 }
 

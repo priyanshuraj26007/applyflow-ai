@@ -29,6 +29,7 @@
       ],
       "js": [
         "icons.js",
+        "schedule-time.js",
         "content.js"
       ],
       "run_at": "document_idle"

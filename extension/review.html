@@ -93,8 +93,12 @@
             <span id="saveState" class="muted small"></span>
           </div>
 
-          <button id="sendBtn" class="btn primary big send">Send Application</button>
-          <p class="muted small center">Nothing is sent until you click Send and confirm.</p>
+          <div id="scheduleBox"></div>
+          <div class="send-row">
+            <button id="sendBtn" class="btn primary big send">Send Application</button>
+            <button id="laterBtn" class="btn big later" title="Pick a time; ApplyFlow sends it from your Gmail then, even if this laptop is off"><span data-icon="clock" data-size="16"></span>Send later</button>
+          </div>
+          <p class="muted small center">Nothing is sent until you click Send and confirm, or pick a time with Send later.</p>
         </div>
 
         <div class="card">
@@ -115,6 +119,7 @@
 
   <script src="icons.js"></script>
   <script src="config.js"></script>
+  <script src="schedule-time.js"></script>
   <script src="common.js"></script>
   <script src="review.js"></script>
 </body>

@@ -107,7 +107,11 @@ function renderApplications() {
         </td>
         <td>${esc(j.recruiter || "—")}<div class="muted small">${esc(j.email || "no email")}</div></td>
         <td class="small">${esc(formatDate(a.detectedAt))}</td>
-        <td class="small">${esc(formatDate(a.appliedAt))}</td>
+        <td class="small">${a.schedule?.status === "scheduled"
+          ? `<span class="sched">${AF_ICONS.clock(13)}${esc(AF_SCHEDULE.label(a.schedule.sendAt))}</span>`
+          : a.schedule?.status === "failed"
+            ? `<span class="sched failed" title="${esc(a.schedule.error || "")}">${AF_ICONS.warning(13)}Scheduled send failed</span>`
+            : esc(formatDate(a.appliedAt))}</td>
         <td class="small">${esc(resume?.label || "—")}</td>
         <td>
           <select data-action="status" aria-label="Status">
@@ -116,7 +120,7 @@ function renderApplications() {
         </td>
         <td class="actions">
           ${a.sourceUrl ? `<a class="btn small" href="${esc(a.sourceUrl)}" target="_blank" rel="noopener noreferrer" title="Open LinkedIn post" aria-label="Open LinkedIn post">${AF_ICONS.external(14)}</a>` : ""}
-          <a class="btn small primary" href="review.html?id=${encodeURIComponent(a.id)}" target="_blank">${a.appliedAt ? "Open" : "Review"}</a>
+          <a class="btn small primary" href="review.html?id=${encodeURIComponent(a.id)}" target="_blank">${a.appliedAt ? "Open" : a.schedule?.status === "failed" ? "Fix" : "Review"}</a>
           <button class="btn small danger" data-action="delete" title="Delete" aria-label="Delete">${AF_ICONS.trash(14)}</button>
         </td>
       </tr>`;

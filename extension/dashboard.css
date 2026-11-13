@@ -61,3 +61,6 @@ table.apps { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 /* Settings: highlight the AI key card until a key is saved */
 .card.needs-key { border-color: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft), var(--shadow); }
 
+/* Applications: scheduled send time / failure in the "Applied" column */
+.sched { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.sched.failed { color: var(--danger); }

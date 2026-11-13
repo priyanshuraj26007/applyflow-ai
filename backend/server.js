@@ -20,7 +20,10 @@ import multer from "multer";
 
 import { callAI, aiKeys, MODEL_TIERS, PROVIDER_ORDER } from "./lib/ai-router.js";
 import { runAsUser, LOCAL_USER, USER_ID_RE, currentUserId, background } from "./lib/context.js";
-import { USING_SUPABASE } from "./lib/store.js";
+import { USING_SUPABASE, supabaseClient } from "./lib/store.js";
+import { sendApplication } from "./lib/sender.js";
+import { scheduleApplication, cancelSchedule, dropSchedule, runDueJobs, startLocalScheduler, syncCronConfig } from "./lib/scheduler.js";
+import crypto from "node:crypto";
 import { analyzeJobPost, matchResumes, writeEmail, draftApplication, normaliseJob, DEFAULT_EMAIL_SKELETON } from "./lib/ai.js";
 import { ABOUT_ME_PROMPT, aboutMeState, ensureCondensed, aboutMeForPrompt } from "./lib/about-me.js";
 import {
@@ -76,6 +79,17 @@ app.use((req, res, next) => {
 });
 app.use(cors({ origin: (origin, cb) => cb(null, isAllowedOrigin(origin)) }));
 app.use(express.json({ limit: "200kb" }));
+
+// Hosted: once per server start, give the database the address + secret its
+// once-a-minute scheduler uses to call /internal/send-due (see lib/scheduler.js).
+let cronConfigSynced = false;
+app.use((req, res, next) => {
+  if (!cronConfigSynced && USING_SUPABASE) {
+    cronConfigSynced = true;
+    background(syncCronConfig().catch((e) => { cronConfigSynced = false; throw e; }));
+  }
+  next();
+});
 
 // 3. Which tester is this? Every /api request runs inside that tester's own data space.
 //    On your PC the header is optional (curl tests use the "local" space).
@@ -145,6 +159,8 @@ app.get("/api/status", route(async (req, res) => {
     analysedResumes: resumes.filter(r => r.profile).length,
     applications: applications.length,
     applied: applications.filter(a => a.appliedAt).length,
+    scheduled: applications.filter(a => a.schedule?.status === "scheduled").length,
+    scheduleFailed: applications.filter(a => a.schedule?.status === "failed").length,
     gmail: gmailStatus
   });
 }));
@@ -237,7 +253,10 @@ app.get("/api/applications/:id", route(async (req, res) => {
 }));
 
 app.patch("/api/applications/:id", route(async (req, res) => {
-  res.json({ success: true, application: await editApplication(req.params.id, req.body || {}) });
+  let record = await editApplication(req.params.id, req.body || {});
+  // Status changed by hand away from "Scheduled" → the scheduled send is called off.
+  if (record.schedule && req.body?.status && req.body.status !== "Scheduled") record = (await dropSchedule(record.id)) || record;
+  res.json({ success: true, application: record });
 }));
 
 app.delete("/api/applications/:id", route(async (req, res) => {
@@ -343,58 +362,40 @@ app.post("/api/applications/:id/prepare", aiLimiter, route(async (req, res) => {
 }));
 
 // Send — ONLY ever triggered by the user clicking "Send Application".
-const sending = new Set();
 app.post("/api/applications/:id/send", route(async (req, res) => {
   const { to, subject, body, resumeId, confirm, allowDuplicate } = req.body || {};
-  const id = req.params.id;
-  const sendKey = `${currentUserId()}:${id}`;
-
   if (confirm !== true) {
     return res.status(400).json({ success: false, errorCode: "NOT_CONFIRMED", error: "Sending requires explicit confirmation." });
   }
-  if (sending.has(sendKey)) {
-    return res.status(409).json({ success: false, errorCode: "ALREADY_SENDING", error: "This application is already being sent." });
+  const before = await getApplication(req.params.id);
+  const updated = await sendApplication({ id: req.params.id, to, subject, body, resumeId, allowDuplicate });
+  if (before?.schedule) await dropSchedule(req.params.id); // "Send now" on a scheduled email
+  res.json({ success: true, application: updated });
+}));
+
+// Send later — also only after the user confirms. Body: send fields + sendAt (ISO time).
+app.post("/api/applications/:id/schedule", route(async (req, res) => {
+  const { to, subject, body, resumeId, sendAt, confirm, allowDuplicate } = req.body || {};
+  if (confirm !== true) {
+    return res.status(400).json({ success: false, errorCode: "NOT_CONFIRMED", error: "Scheduling requires explicit confirmation." });
   }
+  const result = await scheduleApplication({ id: req.params.id, to, subject, body, resumeId, sendAt, allowDuplicate });
+  res.json({ success: true, ...result });
+}));
 
-  sending.add(sendKey);
-  try {
-    const record = await getApplication(id);
-    if (!record) return res.status(404).json({ success: false, error: "Application not found." });
+app.delete("/api/applications/:id/schedule", route(async (req, res) => {
+  res.json({ success: true, application: await cancelSchedule(req.params.id) });
+}));
 
-    if (!allowDuplicate) {
-      const earlier = (await findDuplicates(record)).filter(d => d.appliedAt);
-      if (record.sentMessageId || earlier.length) {
-        return res.status(409).json({
-          success: false, errorCode: "DUPLICATE",
-          error: "You have already applied to this opening. Send again anyway?",
-          duplicates: earlier
-        });
-      }
-    }
-
-    const resume = await getResume(resumeId);
-    if (!resume) return res.status(400).json({ success: false, errorCode: "NO_RESUME", error: "Please choose a resume to attach." });
-
-    const content = await readResumeFile(resume);
-    const filename = resume.originalName || `${resume.label}.pdf`;
-
-    const result = await gmail.sendEmail({ to, subject, body, attachment: { filename, content } });
-
-    const updated = await modifyApplication(id, (a) => {
-      const now = new Date().toISOString();
-      a.email = { ...(a.email || {}), to: String(to).trim(), subject, body, resumeId };
-      a.resumeId = resumeId;
-      a.status = "Applied";
-      a.appliedAt = now;
-      a.sentMessageId = result.messageId;
-      a.history.push({ at: now, event: `email sent to ${String(to).trim()} with ${resume.label}` });
-    });
-
-    console.log(`ApplyFlow AI: application sent (${updated.job?.jobTitle || "role"}).`);
-    res.json({ success: true, application: updated });
-  } finally {
-    sending.delete(sendKey);
-  }
+// Called every minute by Supabase (pg_cron) — but only when a scheduled email is due.
+// Protected by a shared secret; not under /api (no tester ID: it sends for every tester).
+app.post("/internal/send-due", route(async (req, res) => {
+  const secret = process.env.CRON_SECRET || "";
+  const given = String(req.headers["x-cron-secret"] || "");
+  const ok = secret.length >= 32 && given.length === secret.length &&
+    crypto.timingSafeEqual(Buffer.from(given), Buffer.from(secret));
+  if (!ok) return res.status(401).json({ success: false, errorCode: "FORBIDDEN", error: "Not allowed." });
+  res.json({ success: true, ...(await runDueJobs()) });
 }));
 
 // ------------------------------------------
@@ -526,7 +527,8 @@ app.use((error, req, res, next) => {
   res.status(status === 500 && code.startsWith("GEMINI") ? 502 : status).json({
     success: false,
     errorCode: code,
-    error: known ? error.message : "Something went wrong on the ApplyFlow AI backend."
+    error: known ? error.message : "Something went wrong on the ApplyFlow AI backend.",
+    ...(Array.isArray(error?.duplicates) ? { duplicates: error.duplicates } : {})
   });
 });
 
@@ -542,6 +544,8 @@ function startLocalServer() {
 const server = app.listen(PORT, "127.0.0.1", () => {
   console.log(`ApplyFlow AI backend running at http://127.0.0.1:${PORT}`);
   console.log(`Storage: ${USING_SUPABASE ? "Supabase" : "files in backend/data/users"}`);
+  // Hosted, Supabase's pg_cron does this; on your PC a timer checks for due emails.
+  if (!USING_SUPABASE) startLocalScheduler();
   console.log(`AI providers: ${PROVIDER_ORDER.join(" → ")}`);
   console.log(`  draft: ${MODEL_TIERS.draft.join(" → ")}`);
   console.log(`  fast:  ${MODEL_TIERS.fast.join(" → ")}`);

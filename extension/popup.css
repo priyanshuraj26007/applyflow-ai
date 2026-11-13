@@ -34,3 +34,5 @@ body { width: 360px; }
 
 .status { text-align: center; min-height: 16px; }
 .p-footer { text-align: center; color: var(--faint); font-size: 11.5px; }
+
+.danger-text { color: var(--danger); }

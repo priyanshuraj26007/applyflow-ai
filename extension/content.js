@@ -416,6 +416,9 @@ function displayJobFromAi(aiJob, localJob) {
 // 5. The window shrinks back to the notification when you scroll the feed, click
 //    anywhere outside it, or press Escape. Nothing is lost: reopen it any time.
 // 6. The notification always shows the NEWEST hiring post; ‹ › step back through older ones.
+// 7. "Send later" (clock button next to Send): pick a time; the server sends it then,
+//    even if this laptop is off. Until then the email stays editable, and it can be
+//    sent now, moved to another time, or cancelled. Time helpers: schedule-time.js.
 // Everything lives in one Shadow DOM so LinkedIn's CSS can't break it.
 // Light/dark follows LinkedIn's own theme. Icons come from icons.js (AF_ICONS).
 // This page never talks to the backend directly — every call goes through background.js.
@@ -839,6 +842,64 @@ const applyFlowPopup = (() => {
     render();
   }
 
+  // ---------- Send later ----------
+  const scheduleOf = (post) => post?.application?.schedule || null;
+
+  function openSchedulePicker(post) {
+    if (!context) loadContext();
+    const problem = validateBeforeSend(post);
+    if (problem) {
+      post.send = { status: "idle", error: problem };
+      return render();
+    }
+    const current = scheduleOf(post)?.status === "scheduled" ? new Date(scheduleOf(post).sendAt) : null;
+    const first = AF_SCHEDULE.presets().find(p => p.id === "tomorrow");
+    post.send = { status: "pick", when: (current || first.when).toISOString() };
+    render();
+  }
+
+  async function doSchedule(post, allowDuplicate = false) {
+    const problem = validateBeforeSend(post) || AF_SCHEDULE.problem(post.send.when);
+    if (problem) {
+      post.send = { ...post.send, status: "pick", error: problem === "GMAIL" ? "Connect Gmail in Settings first." : problem };
+      return render();
+    }
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    const when = post.send.when;
+    post.send = { status: "scheduling", when };
+    render();
+    const response = await sendToBackground({
+      type: "SCHEDULE_SEND",
+      applicationId: post.applicationId,
+      to: post.fields.to.trim(),
+      subject: post.fields.subject.trim(),
+      body: post.fields.body,
+      resumeId: post.resumeId,
+      sendAt: new Date(when).toISOString(),
+      confirm: true,               // the user picked a time and clicked "Schedule"
+      allowDuplicate
+    });
+    if (response.success) {
+      post.application = response.application;
+      post.send = { status: "idle", warning: response.warning || null };
+    } else if (response.errorCode === "DUPLICATE") {
+      post.send = { status: "pick", when, duplicate: true, error: response.error };
+    } else {
+      post.send = { status: "pick", when, error: response.error };
+    }
+    render();
+  }
+
+  async function cancelScheduled(post) {
+    post.send = { status: "cancelling" };
+    render();
+    const response = await sendToBackground({ type: "CANCEL_SCHEDULE", applicationId: post.applicationId });
+    if (response.success) post.application = response.application;
+    post.send = { status: "idle", error: response.success ? null : response.error };
+    render();
+  }
+
   function pickResume(post, resumeId) {
     if (!post || !resumeId || resumeId === post.resumeId) return;
     if (post.send.status === "sent" || post.send.status === "sending") return;
@@ -916,6 +977,18 @@ const applyFlowPopup = (() => {
         clearTimeout(confirmTimer);
         if (post) { post.send = { status: "idle" }; render(); }
         break;
+      case "schedule-open":
+        if (post) openSchedulePicker(post);
+        break;
+      case "schedule-preset":
+        if (post) { post.send = { ...post.send, when: target.dataset.when, error: null, duplicate: false }; renderFooterOnly(); }
+        break;
+      case "schedule-confirm":
+        if (post) doSchedule(post, !!post.send.duplicate);
+        break;
+      case "schedule-cancel":
+        if (post) cancelScheduled(post);
+        break;
     }
   }
 
@@ -926,8 +999,16 @@ const applyFlowPopup = (() => {
   }
 
   function onInput(event) {
-    const field = event.target.dataset.field;
     const post = current();
+    if (event.target.dataset.scheduleInput !== undefined && post) {
+      const value = event.target.value ? new Date(event.target.value).toISOString() : "";
+      post.send = { ...post.send, when: value, error: null, duplicate: false };
+      const button = root.querySelector("[data-action='schedule-confirm'] .ellipsis");
+      if (button) button.textContent = value ? `Schedule for ${AF_SCHEDULE.label(value)}` : "Pick a time";
+      root.querySelectorAll(".chip[data-when]").forEach(c => c.classList.remove("on"));
+      return;
+    }
+    const field = event.target.dataset.field;
     if (!field || !post) return;
     post.fields[field] = event.target.value;
     if (post.send.status === "confirm" || post.send.error) {
@@ -1003,6 +1084,7 @@ const applyFlowPopup = (() => {
     let right;
     if (post.state === "analysing") right = `<span class="pill ghost"><span class="spin"></span>Reading</span>`;
     else if (post.send.status === "sent" || post.alreadyApplied) right = `<span class="pill ghost">${I.check(13)}Applied</span>`;
+    else if (scheduleOf(post)?.status === "scheduled") right = `<span class="pill ghost">${I.clock(13)}Scheduled</span>`;
     else right = `<span class="pill solid">View</span>`;
 
     return `
@@ -1195,6 +1277,28 @@ const applyFlowPopup = (() => {
       </section>`;
   }
 
+  function schedulePickerHtml(post) {
+    const s = post.send;
+    const busy = s.status === "scheduling";
+    const chips = AF_SCHEDULE.presets().map(p => {
+      const on = s.when && Math.abs(new Date(s.when) - p.when) < 60000;
+      return `<button class="chip ${on ? "on" : ""}" data-action="schedule-preset" data-when="${p.when.toISOString()}" ${busy ? "disabled" : ""}>${e(p.label)}</button>`;
+    }).join("");
+    const lim = AF_SCHEDULE.limits();
+    const value = s.when ? AF_SCHEDULE.toInput(new Date(s.when)) : "";
+    return `
+      <div class="picker">
+        <div class="picker-title">${I.clock(15)}<strong>Send later</strong><span class="muted">sent from your Gmail, even if this laptop is off</span></div>
+        <div class="chips">${chips}</div>
+        <input type="datetime-local" class="when" data-schedule-input value="${value}" min="${lim.min}" max="${lim.max}" ${busy ? "disabled" : ""} aria-label="Send at">
+        ${s.error ? `<div class="note ${s.duplicate ? "" : "danger"}">${I.warning(15)}<span>${e(s.error)}</span></div>` : ""}
+      </div>
+      <button class="btn primary wide" data-action="schedule-confirm" ${busy ? "disabled" : ""}>
+        ${busy ? `<span class="spin inverse"></span>Scheduling…` : `${I.clock(16)}<span class="ellipsis">${s.duplicate ? "Schedule anyway for " : "Schedule for "}${e(AF_SCHEDULE.label(s.when) || "…")}</span>`}
+      </button>
+      <button class="link center" data-action="cancel-send" ${busy ? "disabled" : ""}>Back</button>`;
+  }
+
   function footerHtml(post) {
     if (!post) return `<footer class="foot"></footer>`;
     const ready = post.draft.status === "ready";
@@ -1223,6 +1327,25 @@ const applyFlowPopup = (() => {
         <button class="link center" data-action="cancel-send">Cancel</button>`;
     } else if (s.status === "sending") {
       main = `<button class="btn primary wide" disabled><span class="spin inverse"></span>Sending…</button>`;
+    } else if (s.status === "pick" || s.status === "scheduling") {
+      main = schedulePickerHtml(post);
+    } else if (s.status === "cancelling") {
+      main = `<button class="btn wide" disabled><span class="spin"></span>Cancelling…</button>`;
+    } else if (scheduleOf(post)?.status === "scheduled") {
+      const sch = scheduleOf(post);
+      main = `
+        ${s.warning ? `<div class="note">${I.warning(15)}<span>${e(s.warning)}</span></div>` : ""}
+        ${s.error ? `<div class="note danger">${I.warning(15)}<span>${e(s.error)}</span></div>` : ""}
+        <div class="sent scheduled">
+          <span class="sent-check soft">${I.clock(18)}</span>
+          <div><strong>Scheduled · ${e(AF_SCHEDULE.label(sch.sendAt))}</strong>
+            <div class="foot-sub">To ${e(post.application?.email?.to || post.fields.to)} · you can still edit the email</div></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" data-action="schedule-open">${I.clock(15)}Change time</button>
+          <button class="btn" data-action="send">${I.send(15)}Send now</button>
+          <button class="btn" data-action="schedule-cancel">Cancel</button>
+        </div>`;
     } else if (s.status === "duplicate") {
       main = `
         <div class="note">${e(s.error)}</div>
@@ -1236,7 +1359,13 @@ const applyFlowPopup = (() => {
       } else if (s.error) {
         problem = `<div class="note danger">${I.warning(15)}<span>${e(s.error)}</span></div>`;
       }
-      main = `${problem}<button class="btn primary wide" data-action="send">${I.send(16)}Send application</button>`;
+      const failed = scheduleOf(post)?.status === "failed"
+        ? `<div class="note danger">${I.warning(15)}<span>The scheduled email wasn't sent: ${e(scheduleOf(post).error || "unknown error")}</span></div>` : "";
+      main = `${failed}${problem}
+        <div class="send-row">
+          <button class="btn primary wide" data-action="send">${I.send(16)}${failed ? "Send now" : "Send application"}</button>
+          <button class="btn square" data-action="schedule-open" title="Send later" aria-label="Send later">${I.clock(18)}</button>
+        </div>`;
     }
 
     return `
@@ -1562,6 +1691,21 @@ const POPUP_CSS = `
     background: var(--ink); color: var(--on-ink); animation: pop .4s cubic-bezier(.2, 1.5, .4, 1);
   }
   .foot-sub { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+  .send-row { display: flex; gap: 8px; }
+  .send-row .btn.wide { flex: 1; }
+  .btn.square { width: 48px; height: 48px; padding: 0; border-radius: 14px; flex-shrink: 0; }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { flex: 1; padding: 9px 8px; }
+  .sent-check.soft { background: var(--surface-3); color: var(--text); animation: none; }
+  .picker { margin-bottom: 12px; }
+  .picker-title { display: flex; align-items: center; gap: 7px; font-size: 13.5px; margin-bottom: 10px; flex-wrap: wrap; }
+  .picker-title .muted { color: var(--muted); font-size: 12px; font-weight: 400; flex-basis: 100%; margin-left: 22px; margin-top: -4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 6px 11px; font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+  .chip:hover:not(:disabled) { background: var(--surface-2); }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+  .when { width: 100%; box-sizing: border-box; height: 38px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; color-scheme: light dark; }
+  .picker .note { margin: 10px 0 0; }
 
   @keyframes drop { from { opacity: 0; transform: translateY(-16px) scale(.97); } }
   @keyframes expand { from { opacity: 0; transform: scale(.92) translateY(-6px); border-radius: 28px; } }

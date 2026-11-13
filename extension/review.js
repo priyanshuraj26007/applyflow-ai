@@ -47,6 +47,7 @@ function setComposerEnabled(enabled) {
     el.disabled = !enabled || sent;
   }
   $("#sendBtn").disabled = !enabled || !app?.email?.body;
+  if ($("#laterBtn")) $("#laterBtn").disabled = !enabled || !app?.email?.body;
   $all("#matchList input").forEach(i => { i.disabled = !enabled || sent; });
 }
 
@@ -163,6 +164,131 @@ function renderTracking() {
     .map(h => `<div>${esc(formatDate(h.at, true))} — ${esc(h.event)}</div>`).join("");
 }
 
+// ---------- Send later ----------
+function renderSchedule() {
+  const box = $("#scheduleBox");
+  const sch = app?.schedule;
+  const sent = app?.sentMessageId && !sch;
+  $("#laterBtn").classList.toggle("hidden", !!sent);
+  if (!sch) { box.innerHTML = ""; return; }
+  if (sch.status === "scheduled") {
+    box.innerHTML = `
+      <div class="schedule-box">
+        ${AF_ICONS.clock(20)}
+        <div class="grow"><strong>Scheduled · ${esc(AF_SCHEDULE.label(sch.sendAt))}</strong>
+          <div class="sub">To ${esc(app.email?.to || "")} · edits you make here are saved and sent</div></div>
+        <button class="btn small" id="schedChange">Change time</button>
+        <button class="btn small" id="schedCancel">Cancel</button>
+      </div>`;
+    $("#sendBtn").textContent = "Send now";
+    $("#laterBtn").classList.add("hidden");
+  } else {
+    box.innerHTML = `
+      <div class="schedule-box failed">
+        ${AF_ICONS.warning(20)}
+        <div class="grow"><strong>The scheduled email wasn't sent</strong>
+          <div class="sub">${esc(sch.error || "Unknown error")}</div></div>
+        <button class="btn small" id="schedChange">Pick a new time</button>
+        <button class="btn small" id="schedCancel">Dismiss</button>
+      </div>`;
+  }
+  $("#schedChange").onclick = () => scheduleLater();
+  $("#schedCancel").onclick = () => cancelScheduled();
+}
+
+/** Same checks as Send. Returns false (and explains) if something is missing. */
+function readyToSend() {
+  const to = $("#emailTo").value.trim();
+  if (!EMAIL_RE.test(to)) { toast("Please enter a valid recruiter email address.", "error"); $("#emailTo").focus(); return false; }
+  if (!$("#emailSubject").value.trim()) { toast("Please add a subject.", "error"); return false; }
+  if (!$("#emailBody").value.trim()) { toast("The email body is empty.", "error"); return false; }
+  if (!app.resumeId) { toast("Please choose a resume to attach.", "error"); return false; }
+  if (!gmail.connected) {
+    toast(gmail.configured ? "Connect Gmail first (button above the email)." : "Gmail isn't set up yet — see Settings in the dashboard.", "error");
+    return false;
+  }
+  return true;
+}
+
+async function scheduleLater(allowDuplicate = false, presetWhen = null) {
+  if (!readyToSend()) return;
+  const current = app.schedule?.status === "scheduled" ? new Date(app.schedule.sendAt) : null;
+  let when = presetWhen || current || AF_SCHEDULE.presets().find(p => p.id === "tomorrow").when;
+  const lim = AF_SCHEDULE.limits();
+  const chips = AF_SCHEDULE.presets().map(p =>
+    `<button type="button" class="chip" data-when="${p.when.toISOString()}">${esc(p.label)}</button>`).join("");
+
+  // Chips fill the time box; the box is the single source of truth.
+  const onChip = (e) => {
+    const chip = e.target.closest(".chip[data-when]");
+    if (!chip) return;
+    const input = document.querySelector("#schedWhen");
+    input.value = AF_SCHEDULE.toInput(new Date(chip.dataset.when));
+    document.querySelectorAll(".chip[data-when]").forEach(c => c.classList.toggle("on", c === chip));
+  };
+  let chosen = AF_SCHEDULE.toInput(new Date(when));
+  const onInput = (e) => { if (e.target.id === "schedWhen") chosen = e.target.value; };
+  document.addEventListener("click", onChip);
+  document.addEventListener("input", onInput);
+
+  const ok = await confirmDialog({
+    title: allowDuplicate ? "Schedule anyway?" : "Send later",
+    html: `<p class="muted small" style="margin-top:0">ApplyFlow sends it from <strong>${esc(gmail.email || "your Gmail")}</strong> at this time, even if this laptop is off. You can keep editing the email until then.</p>
+           <div class="chips">${chips}</div>
+           <input type="datetime-local" id="schedWhen" class="when-input" value="${AF_SCHEDULE.toInput(new Date(when))}" min="${lim.min}" max="${lim.max}">`,
+    confirmText: "Schedule"
+  });
+  const input = document.querySelector("#schedWhen");
+  if (input) chosen = input.value;
+  document.removeEventListener("click", onChip);
+  document.removeEventListener("input", onInput);
+  if (!ok) return;
+
+  when = chosen ? new Date(chosen) : null;
+  const problem = AF_SCHEDULE.problem(when);
+  if (problem) { toast(problem, "error"); return scheduleLater(allowDuplicate, when && !Number.isNaN(when.getTime()) ? when : null); }
+
+  busy = true;
+  setComposerEnabled(false);
+  try {
+    clearTimeout(saveTimer);
+    const data = await api(`/api/applications/${encodeURIComponent(appId)}/schedule`, {
+      method: "POST",
+      body: {
+        to: $("#emailTo").value.trim(), subject: $("#emailSubject").value.trim(), body: $("#emailBody").value.trim(),
+        resumeId: app.resumeId, sendAt: when.toISOString(), confirm: true, allowDuplicate
+      }
+    });
+    app = data.application;
+    toast(`Scheduled for ${AF_SCHEDULE.label(app.schedule.sendAt)}.`);
+    if (data.warning) banner(`${AF_ICONS.warning(16)}<span>${esc(data.warning)}</span>`, "warn", "schedwarn");
+  } catch (error) {
+    busy = false;
+    if (error.code === "DUPLICATE") {
+      const again = await confirmDialog({ title: "Already applied", html: esc(error.message), confirmText: "Schedule anyway" });
+      if (again) return scheduleLater(true, when);
+    } else {
+      toast(error.message, "error");
+    }
+  } finally {
+    busy = false;
+    renderAll();
+  }
+}
+
+async function cancelScheduled() {
+  const scheduled = app.schedule?.status === "scheduled";
+  if (scheduled && !(await confirmDialog({ title: "Cancel the scheduled email?", html: "It won't be sent. Your email text is kept.", confirmText: "Cancel it", danger: true }))) return;
+  try {
+    app = (await api(`/api/applications/${encodeURIComponent(appId)}/schedule`, { method: "DELETE" })).application;
+    clearBanner("schedwarn");
+    if (scheduled) toast("Scheduled email cancelled.");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+  renderAll();
+}
+
 function renderSentState() {
   if (!(app.status === "Applied" || app.appliedAt) || !app.sentMessageId) return;
   clearBanner("dup");
@@ -178,6 +304,8 @@ function renderAll() {
   renderGmail();
   renderTracking();
   setComposerEnabled(!busy);
+  $("#sendBtn").textContent = "Send Application";
+  renderSchedule();
   renderSentState();
 }
 
@@ -275,7 +403,7 @@ async function send(allowDuplicate = false) {
 
   if (!allowDuplicate) {
     const ok = await confirmDialog({
-      title: "Send this application?",
+      title: app.schedule?.status === "scheduled" ? "Send it now instead?" : "Send this application?",
       html: `<dl class="kv">
                <dt>To</dt><dd>${esc(to)}</dd>
                <dt>From</dt><dd>${esc(gmail.email || "your Gmail")}</dd>
@@ -363,6 +491,7 @@ $("#copyBtn").addEventListener("click", async () => {
   toast("Email copied to clipboard.");
 });
 $("#sendBtn").addEventListener("click", () => send(false));
+$("#laterBtn").addEventListener("click", () => scheduleLater());
 $("#statusSelect").addEventListener("change", (e) => patchApp({ status: e.target.value }));
 $("#markAppliedBtn").addEventListener("click", () => patchApp({ status: "Applied" }));
 let notesTimer;

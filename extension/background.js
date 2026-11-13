@@ -225,6 +225,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
   }
 
+  // Send later — only after the user picked a time and clicked "Schedule".
+  if (message.type === "SCHEDULE_SEND") {
+    return respond(sendResponse, async () => {
+      const result = await api(`${appPath(message.applicationId)}/schedule`, {
+        method: "POST",
+        body: {
+          to: message.to,
+          subject: message.subject,
+          body: message.body,
+          resumeId: message.resumeId,
+          sendAt: message.sendAt,
+          confirm: message.confirm === true,
+          allowDuplicate: message.allowDuplicate === true
+        }
+      });
+      return { application: result.application, warning: result.warning };
+    });
+  }
+
+  if (message.type === "CANCEL_SCHEDULE") {
+    return respond(sendResponse, async () => {
+      const result = await api(`${appPath(message.applicationId)}/schedule`, { method: "DELETE" });
+      return { application: result.application };
+    });
+  }
+
   if (message.type === "ANALYZE_TEXT") {
     (async () => {
       try {

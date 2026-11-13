@@ -30,7 +30,10 @@ async function loadStatus() {
     $("#stResumes").textContent = s.resumes
       ? (s.analysedResumes === s.resumes ? `${s.resumes} ready` : `${s.analysedResumes} of ${s.resumes} ready`)
       : "None yet";
-    $("#stApps").textContent = `${s.applications} found · ${s.applied} sent`;
+    $("#stApps").textContent = [`${s.applications} found`, `${s.applied} sent`,
+      s.scheduled ? `${s.scheduled} scheduled` : "", s.scheduleFailed ? `${s.scheduleFailed} failed` : ""]
+      .filter(Boolean).join(" · ");
+    if (s.scheduleFailed) $("#stApps").classList.add("danger-text");
   } catch (error) {
     $("#liveBadge").className = "badge danger";
     $("#liveText").textContent = "Offline";

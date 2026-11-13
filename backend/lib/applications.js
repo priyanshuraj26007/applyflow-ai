@@ -11,7 +11,7 @@ import { readJson, updateJson } from "./store.js";
 const EMPTY = { applications: [] };
 
 export const STATUSES = [
-  "Detected", "Analysed", "Ready to Apply", "Applied", "Interview", "Rejected", "No Response"
+  "Detected", "Analysed", "Ready to Apply", "Scheduled", "Applied", "Interview", "Rejected", "No Response"
 ];
 
 export class ApplicationError extends Error {
@@ -120,6 +120,10 @@ export function editApplication(id, changes) {
   return modifyApplication(id, (app) => {
     if (changes.status !== undefined) {
       if (!STATUSES.includes(changes.status)) throw new ApplicationError("BAD_STATUS", "Unknown status.");
+      // "Scheduled" is set only by scheduling a send (it needs a time), not by hand.
+      if (changes.status === "Scheduled" && app.status !== "Scheduled") {
+        throw new ApplicationError("BAD_STATUS", "Use “Schedule” on the application to send it later.");
+      }
       if (changes.status !== app.status) {
         app.history.push({ at: new Date().toISOString(), event: `status: ${app.status} → ${changes.status}` });
         app.status = changes.status;
