@@ -24,6 +24,8 @@ import { USING_SUPABASE, supabaseClient } from "./lib/store.js";
 import { sendApplication } from "./lib/sender.js";
 import { scheduleApplication, cancelSchedule, dropSchedule, runDueJobs, startLocalScheduler, syncCronConfig } from "./lib/scheduler.js";
 import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { analyzeJobPost, matchResumes, writeEmail, draftApplication, normaliseJob, DEFAULT_EMAIL_SKELETON } from "./lib/ai.js";
 import { ABOUT_ME_PROMPT, aboutMeState, ensureCondensed, aboutMeForPrompt } from "./lib/about-me.js";
 import {
@@ -50,6 +52,16 @@ const EXTENSION_ID = (process.env.ALLOWED_EXTENSION_ID || "").trim();
 // SECURITY
 // ------------------------------------------
 app.disable("x-powered-by");
+
+// Cold-start visibility: each response says how long this server instance has been up,
+// and whether this is the first request it ever served (= the visitor waited for a cold start).
+const BOOTED_AT = Date.now();
+let requestsServed = 0;
+app.use((req, res, next) => {
+  res.set("X-Instance-Age", String(Math.round((Date.now() - BOOTED_AT) / 1000)));
+  if (requestsServed++ === 0) res.set("X-Cold-Start", "1");
+  next();
+});
 
 // 1. On your PC: block DNS-rebinding attacks — only answer requests addressed to this machine.
 app.use((req, res, next) => {
@@ -145,8 +157,12 @@ const isNonEmptyString = (v, min = 1) => typeof v === "string" && v.trim().lengt
 // ------------------------------------------
 // HEALTH + STATUS
 // ------------------------------------------
+// The product website + extension download (public/). On Vercel these files are served
+// straight from Vercel's CDN; on your PC this line serves them.
+app.use(express.static(path.join(path.dirname(fileURLToPath(import.meta.url)), "public"), { maxAge: "10m" }));
+
 const health = (req, res) => res.json({ success: true, message: "ApplyFlow AI backend is running!" });
-app.get("/", health);         // on Vercel the website (public/index.html) is shown at / instead
+app.get("/", health);         // only reached if public/index.html is missing
 app.get("/health", health);
 
 app.get("/api/status", route(async (req, res) => {
@@ -408,8 +424,12 @@ app.post("/internal/send-due", route(async (req, res) => {
 // migration). One tiny database read also keeps the free Supabase project active.
 app.post("/internal/warm", route(async (req, res) => {
   if (!fromCron(req)) return res.status(401).json({ success: false, errorCode: "FORBIDDEN", error: "Not allowed." });
-  if (USING_SUPABASE) await (await supabaseClient()).from("applyflow_config").select("key", { head: true, count: "exact" });
-  res.json({ success: true, warm: true });
+  // Record the ping (proves the keep-warm job runs, and counts as database activity).
+  if (USING_SUPABASE) {
+    await (await supabaseClient()).from("applyflow_config")
+      .upsert({ key: "last_warm_ping", value: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "key" });
+  }
+  res.json({ success: true, warm: true, instanceAgeSeconds: Math.round((Date.now() - BOOTED_AT) / 1000) });
 }));
 
 // ------------------------------------------

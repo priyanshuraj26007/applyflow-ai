@@ -1,74 +1,67 @@
-# Testing ApplyFlow AI — start here
+# Testing ApplyFlow: start here
 
-Thanks for helping test ApplyFlow AI! It spots hiring posts on LinkedIn, summarises the job, and drafts a
-personalised application email that you can send from your own Gmail with your resume attached.
+Thanks for helping test ApplyFlow! It spots hiring posts on LinkedIn, summarises the job, and writes a
+personalised application email that you send from your own Gmail with your resume attached.
 
-**Time needed:** about 15–20 minutes, once.
-**Works on:** Windows and Mac, with Google Chrome.
-**Your data stays on your laptop.** Your resumes, settings and Gmail login are stored only on your computer.
-AI requests go to Groq/Gemini using **your own free key**. Nothing is shared with the person who invited you.
+👉 **The easiest way: open [applyflow-ai-murex.vercel.app](https://applyflow-ai-murex.vercel.app)**, which has the
+download and an interactive step-by-step setup guide. The same steps are below.
+
+**Time needed:** about 5 minutes, once.
+**Works on:** Google Chrome, Microsoft Edge or Brave, on Windows or Mac.
+**Cost:** nothing. ApplyFlow, the AI key and Gmail are all free. You'll never be asked for a card.
 
 ---
 
 ## Before you start
-- [ ] **Google Chrome** installed.
-- [ ] **Node.js (LTS)** installed: [nodejs.org/en/download](https://nodejs.org/en/download). Use the default options.
-- [ ] **Gmail sending (optional):** send your Gmail address to the person who invited you, so they can add
-      you as a tester. They'll send you back a **Client ID** and **Client Secret**. Keep these private.
-      You can skip Gmail and copy the emails by hand instead.
+- [ ] **Send your Gmail address** to the person who invited you, so they can add you as a Gmail tester.
+      (You can do everything else meanwhile; only "Connect Gmail" needs this.)
 
-## 1. Download
-On the [Releases page](https://github.com/priyanshuraj26007/applyflow-ai/releases/latest), download
-**Source code (zip)** and unzip it somewhere easy, for example your Desktop.
+## 1. Install the extension
+1. **Download** `ApplyFlow-extension.zip` from the [website](https://applyflow-ai-murex.vercel.app/#download).
+2. **Unzip it.** Windows: right-click → **Extract All…** → **Extract**. Mac: double-click it.
+   Move the **ApplyFlow** folder somewhere it can stay (e.g. Documents). Don't delete it later.
+3. Open `chrome://extensions` (Edge: `edge://extensions`, Brave: `brave://extensions`).
+4. Turn on **Developer mode** (top right) → **Load unpacked** → select the **ApplyFlow** folder.
+5. Click the 🧩 puzzle icon in the toolbar → **pin** ApplyFlow.
 
-## 2. Run setup (one time)
-| Windows | Mac |
-|---|---|
-| Open the unzipped folder and double-click **`setup.bat`**. | Open **Terminal**, type `cd ` (with a space), drag the unzipped folder into the window, press Enter, then run `bash setup.sh`. |
+> If Chrome later says *"Disable developer mode extensions"*, just close that message.
 
-Setup installs everything and asks for:
-1. **Your Groq key** (required, free). Setup opens [console.groq.com/keys](https://console.groq.com/keys):
-   sign in → **Create API Key** → copy it (starts with `gsk_`) → paste it into setup.
-2. **A Gemini key** (optional backup). Press Enter to skip.
-3. **The Gmail Client ID and Secret** you were sent (optional). Press Enter to skip.
+## 2. Get your free AI key (1 minute)
+1. Open [console.groq.com/keys](https://console.groq.com/keys) and sign in (**Continue with Google** is quickest).
+2. **Create API Key** → any name → **Submit** → **copy** it (starts with `gsk_`; Groq shows it only once).
+3. Click the ApplyFlow icon → **Open Dashboard** → **Settings** → paste it under **Your AI key** → **Save**.
+   You should see **✓ Groq key works**.
 
-If Windows shows *"Windows protected your PC"*, click **More info → Run anyway**. It's a plain script; you can open
-`setup.ps1` in Notepad to read exactly what it does.
+No card, no billing: Groq's free plan just has a speed limit (about two emails a minute).
 
-## 3. Start ApplyFlow and load the extension
-1. **Start the backend:** Windows → double-click **`start.bat`**. Mac → `bash start.sh` in Terminal.
-   Keep that window open whenever you use ApplyFlow. It should say *"ApplyFlow AI backend running"*.
-2. In Chrome, open `chrome://extensions` → turn on **Developer mode** (top right) → **Load unpacked** →
-   choose the **`extension`** folder inside the unzipped folder.
-3. Pin it: click the puzzle icon in Chrome's toolbar → pin **ApplyFlow**.
+## 3. Set it up for you (about 3 minutes)
+1. **Resumes** → upload your resume as a PDF (several versions welcome). Wait for **Ready**.
+2. **Settings** → check your **name, phone, LinkedIn** (suggested from your resume) → **Save**.
+3. **Settings → About me** → **Copy the prompt** → paste it into ChatGPT, Claude or Gemini (whichever you use
+   most) → paste its answer into the box → **Save**. After a minute it shows **✓ Ready**.
+4. **Settings → Connect Gmail** (once you've been added as a tester). Google says *"Google hasn't verified this
+   app"*, which is expected for a test app: click **Continue**, then tick **Send email on your behalf**.
 
-## 4. Set it up for you (about 5 minutes)
-Click the ApplyFlow icon → **Open Dashboard**.
-1. **Resumes** → upload your resume as a PDF. Wait for **Ready**; the AI reads it once.
-2. **Settings** → fill in your name, phone and LinkedIn URL.
-3. **Settings → About me** (this is what makes the emails sound like you):
-   **Copy the prompt** → paste it into ChatGPT, Claude or Gemini (whichever you use most) → copy its answer →
-   paste it into the box → **Save settings**. After about 30 seconds you'll see **"✓ Ready"**.
-4. **Settings → Email skeleton:** optional. This is the wording every email keeps; edit it if you like.
-5. **Settings → Gmail → Connect Gmail** (only if you were sent the Client ID/Secret). Google will say
-   *"Google hasn't verified this app"*. That's expected for a test app: click **Continue** and tick
-   **Send email on your behalf**.
-
-## 5. Use it
-1. Browse your **LinkedIn feed**. When a hiring post scrolls by, a **"Hiring post detected"** card appears at the top right.
-2. Click it to see a **job summary**: role, company, fresher or experienced, skills and requirements.
-3. Click **Generate application** to get your best resume, a match score and a drafted email in a few seconds.
-4. Edit anything, then **Send application → Confirm**. Nothing is ever sent without your confirm click.
-   No Gmail? Open the full page with the **↗** button and use **Copy text**.
+## 4. Use it
+1. Open (or refresh) your **LinkedIn feed** and scroll. A **"Hiring post detected"** notification appears at
+   the top right; the **‹ ›** arrows step through older posts.
+2. Click it for the **job summary**, then **Generate application** for your best resume + a written email.
+3. Edit anything, then **Send → Confirm**, or use the **🕒** button to **send later**.
+   Nothing is ever sent without your click. Everything is tracked in the Dashboard.
 
 ## If something goes wrong
 | Problem | Fix |
 |---|---|
-| "ApplyFlow backend is not running" | Start it again (`start.bat` / `bash start.sh`) and keep the window open. |
-| No card on LinkedIn | Refresh LinkedIn. After reloading the extension, LinkedIn tabs that were already open need a refresh. |
-| "The AI is busy" | Groq's free tier allows roughly 2 drafts per minute. Wait a minute and click **Try again**. |
-| "Port 3000 is already in use" | ApplyFlow is already running in another window. Close the extra window. |
-| "Gmail access expired" | Settings → **Connect Gmail** again (test apps expire after 7 days). |
+| No notification on LinkedIn / "please refresh this LinkedIn page" | Refresh LinkedIn (F5), especially after updating or reloading ApplyFlow. |
+| "Add your free Groq API key" | Dashboard → Settings → **Your AI key** (step 2). |
+| "The AI is busy" | Groq's free speed limit. Wait a minute and try again. |
+| "Gmail access expired" | Settings → **Connect Gmail** again (test apps must reconnect every 7 days). |
+| "Access blocked" when connecting Gmail | You haven't been added as a tester yet: send your Gmail address to whoever invited you. |
+| Dashboard shows **Offline** | Check your internet; it reconnects by itself. |
+
+## Updating to a new version
+Download the new zip, replace the contents of your **ApplyFlow** folder with the new files, then click
+**↻ reload** on ApplyFlow in `chrome://extensions` and refresh LinkedIn. Your data is kept.
 
 ---
 

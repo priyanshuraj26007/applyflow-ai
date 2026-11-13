@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ApplyFlow: Apply to LinkedIn jobs in one click</title>
+  <meta name="description" content="ApplyFlow spots hiring posts on LinkedIn, writes a personal application email with your best resume, and sends it from your Gmail. Completely free.">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="ApplyFlow: Apply to LinkedIn jobs in one click">
+  <meta property="og:description" content="From hiring post to sent application in three clicks. Free.">
+  <meta property="og:image" content="/img/icon128.png">
+  <link rel="icon" type="image/png" href="/img/favicon.png">
+  <link rel="preload" href="/fonts/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body>
+  <!-- ============ NAV ============ -->
+  <header class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#top" class="brand" aria-label="ApplyFlow home">
+        <svg class="logo" width="26" height="26" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg>
+        <span>ApplyFlow</span>
+      </a>
+      <nav class="nav-links" aria-label="Sections">
+        <a href="#why">Why</a>
+        <a href="#features">Features</a>
+        <a href="#free">Free</a>
+        <a href="#setup">Setup</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a href="#download" class="pill small">Download</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="wrap">
+        <p class="eyebrow reveal">For everyone job hunting on LinkedIn</p>
+        <h1 class="hero-title reveal">Apply to LinkedIn jobs.<br><span class="grad">In one click.</span></h1>
+        <p class="hero-sub reveal">ApplyFlow spots hiring posts as you scroll, writes a personal email with your best resume, and sends it from your own Gmail. No copying, no pasting, no switching tabs.</p>
+        <div class="hero-cta reveal">
+          <a href="#download" class="pill large">Download for Chrome</a>
+          <a href="#setup" class="link-arrow">See how to set it up</a>
+        </div>
+        <p class="hero-note reveal"><span class="free-dot"></span>Completely free. No card, no trial, no catch.</p>
+      </div>
+
+      <!-- Live demo: a LinkedIn-style feed with ApplyFlow working on it -->
+      <div class="demo-stage reveal" aria-label="Animated demo of ApplyFlow on a LinkedIn feed" role="img">
+        <div class="browser">
+          <div class="browser-bar"><span></span><span></span><span></span><div class="url">linkedin.com/feed</div></div>
+          <div class="browser-body">
+            <div class="feed">
+              <div class="post muted-post"><div class="who"><i></i><div><b>Rohan Kapoor</b><small>Engineering Manager · 2h</small></div></div><p>Great talks at this year's developer conference, thanks to everyone who came by!</p><div class="media"></div></div>
+              <div class="post hiring-post" id="demoPost"><div class="who"><i></i><div><b>Ananya Rao</b><small>Talent Partner at Northwind Health · 3h</small></div></div>
+                <p><strong>We're hiring | Product Analyst</strong><br>Location: Pune · Experience: 0–2 years<br>Skills: SQL, Power BI, stakeholder management<br>Share your resume at ananya.rao@northwind.example</p></div>
+              <div class="post muted-post"><div class="who"><i></i><div><b>Meera Joshi</b><small>Product Designer · 5h</small></div></div><p>Some thoughts on staying productive in a hybrid world.</p><div class="media"></div></div>
+            </div>
+
+            <!-- ApplyFlow notification → window -->
+            <div class="af-toast" id="demoToast">
+              <svg class="logo" width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg>
+              <div><small>Hiring post detected</small><b>Product Analyst <span>· Northwind Health</span></b></div>
+              <em>View</em>
+            </div>
+            <div class="af-window" id="demoWindow">
+              <div class="w-head"><svg class="logo" width="20" height="20" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg><b>ApplyFlow</b></div>
+              <div class="w-body">
+                <div class="tags"><span>✦ Analysed by AI</span><span>Fresher friendly</span></div>
+                <h4>Product Analyst</h4>
+                <p class="w-meta">Northwind Health · Pune</p>
+                <div class="w-resume"><span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15"/><circle class="fill" cx="18" cy="18" r="15"/></svg><b id="demoScore">0</b></span><div><b>Analyst resume</b><small>Best match · SQL, Power BI, dashboards</small></div></div>
+                <div class="w-mail"><small>To ananya.rao@northwind.example</small><p id="demoEmail"></p></div>
+              </div>
+              <div class="w-foot"><div class="w-send" id="demoSend"><span>➤</span> Send application</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="demo-caption" id="demoCaption">Scroll your feed as usual…</div>
+      </div>
+    </section>
+
+    <!-- ============ THE OLD WAY ============ -->
+    <section class="section dark-band" id="why">
+      <div class="wrap">
+        <p class="eyebrow reveal">The problem</p>
+        <h2 class="section-title reveal">Applying shouldn't take<br>ten minutes per job.</h2>
+        <p class="section-sub reveal">Right now, every application from a LinkedIn post looks something like this:</p>
+
+        <div class="compare reveal">
+          <div class="toggle" role="tablist" aria-label="Compare">
+            <button role="tab" aria-selected="true" data-way="old" class="on">The old way</button>
+            <button role="tab" aria-selected="false" data-way="new">With ApplyFlow</button>
+          </div>
+
+          <ol class="steps-old" id="wayOld">
+            <li><span>1</span>Spot a hiring post in your feed</li>
+            <li><span>2</span>Screenshot it, or copy the whole post</li>
+            <li><span>3</span>Open ChatGPT in a new tab</li>
+            <li><span>4</span>Paste it and explain who you are, again</li>
+            <li><span>5</span>Fix the email it gets wrong about you</li>
+            <li><span>6</span>Copy the email</li>
+            <li><span>7</span>Open Gmail and paste it in</li>
+            <li><span>8</span>Find the recruiter's address and the right resume</li>
+            <li><span>9</span>Attach, send, and try to remember you applied</li>
+          </ol>
+          <ol class="steps-new hidden" id="wayNew">
+            <li><span>1</span>Scroll LinkedIn. ApplyFlow taps you on the shoulder: <em>“Hiring post detected.”</em></li>
+            <li><span>2</span>Click <b>Generate application</b>. Your best resume is picked and a personal email is written in seconds.</li>
+            <li><span>3</span>Click <b>Send</b>. It goes from your Gmail, resume attached, and is tracked automatically.</li>
+          </ol>
+
+          <div class="tally">
+            <div><b id="tallySteps">9</b><small>steps</small></div>
+            <div><b id="tallyTabs">4</b><small>tabs</small></div>
+            <div><b id="tallyTime">~10</b><small>minutes per job</small></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FEATURES ============ -->
+    <section class="section" id="features">
+      <div class="wrap">
+        <p class="eyebrow reveal">What it does</p>
+        <h2 class="section-title reveal">Everything between “we're hiring”<br>and “application sent.”</h2>
+
+        <div class="bento">
+          <article class="tile span-2 reveal">
+            <div class="tile-text">
+              <h3>Spots hiring posts for you.</h3>
+              <p>Just scroll. ApplyFlow quietly reads your feed and shows a small notification when a post is a real job opening. Found five? It keeps them all, newest first.</p>
+            </div>
+            <div class="mini-toast"><svg class="logo" width="30" height="30" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg><div><small>3 hiring posts <span class="nav-chip">‹ 3/3 ›</span></small><b>Data Analyst · Acme</b></div><em>View</em></div>
+          </article>
+
+          <article class="tile reveal">
+            <h3>Reads the job.</h3>
+            <p>Role, company, fresher or experienced, must-have skills and requirements, summarised in a second.</p>
+            <ul class="chips"><li>Fresher</li><li>Full-time</li><li>SQL</li><li>Power BI</li><li>Pune</li></ul>
+          </article>
+
+          <article class="tile reveal">
+            <h3>Picks your best resume.</h3>
+            <p>Upload a few versions once. Each job gets a match score, and the best one is attached.</p>
+            <div class="score-row"><span class="big-score">86</span><small>Analyst resume<br><span class="muted">best match</span></small></div>
+          </article>
+
+          <article class="tile reveal">
+            <h3>Writes like you.</h3>
+            <p>It learns your background from your own ChatGPT, Claude or Gemini (“About me”) and follows your own email skeleton. It never invents experience you don't have.</p>
+          </article>
+
+          <article class="tile reveal">
+            <h3>Sends from your Gmail.</h3>
+            <p>Real email, from your address, resume attached. Nothing is ever sent without your click.</p>
+          </article>
+
+          <article class="tile span-2 reveal">
+            <div class="tile-text">
+              <h3>Send later.</h3>
+              <p>Write tonight, deliver at 9:30 AM when recruiters actually read email. It goes out from your Gmail even if your laptop is off, and you can edit, move or cancel it until then.</p>
+            </div>
+            <div class="clock-stack"><span>In 1 hour</span><span class="on">🕒 Tomorrow, 9:30 AM</span><span>Monday, 9:30 AM</span></div>
+          </article>
+
+          <article class="tile reveal">
+            <h3>Private by design.</h3>
+            <p>Your resumes and emails are kept for your copy of ApplyFlow only. It can send mail you approve, never read your inbox.</p>
+          </article>
+
+          <article class="tile span-3 reveal tile-shot">
+            <div class="tile-text">
+              <h3>Remembers every application.</h3>
+              <p>A clean dashboard of every opportunity: applied, scheduled, interviewing. It warns you before you apply to the same opening twice.</p>
+            </div>
+            <picture>
+              <source srcset="/img/dashboard-dark.png" media="(prefers-color-scheme: dark)">
+              <img src="/img/dashboard-light.png" alt="ApplyFlow dashboard listing applications with their status" loading="lazy" width="2560" height="1972">
+            </picture>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FREE ============ -->
+    <section class="section soft-band" id="free">
+      <div class="wrap center">
+        <p class="eyebrow reveal">Pricing</p>
+        <h2 class="price reveal"><span class="grad">₹0</span></h2>
+        <h3 class="price-line reveal">Free. Not a free trial. Just free.</h3>
+        <p class="section-sub reveal">Everything ApplyFlow needs is free, and stays free. You won't be asked for a card, now or later.</p>
+
+        <div class="free-grid">
+          <div class="free-card reveal"><div class="free-icon">✦</div><h4>ApplyFlow</h4><p>The extension, the AI emails, scheduling, the dashboard. All of it.</p><b>Free</b></div>
+          <div class="free-card reveal"><div class="free-icon">⚡</div><h4>Your AI key (Groq)</h4><p>A free key from Groq, made in one minute. No card, no billing setup.</p><b>Free</b></div>
+          <div class="free-card reveal"><div class="free-icon">✉</div><h4>Gmail</h4><p>Emails go out from your normal Gmail account, like any email you write.</p><b>Free</b></div>
+        </div>
+        <p class="reassure reveal">If any screen ever asks you to pay or enter a card while setting up ApplyFlow, stop: you've taken a wrong turn. Nothing here costs money.</p>
+      </div>
+    </section>
+
+    <!-- ============ DOWNLOAD ============ -->
+    <section class="section" id="download">
+      <div class="wrap center">
+        <svg class="logo hero-logo reveal" width="88" height="88" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg>
+        <h2 class="section-title reveal">Get ApplyFlow.</h2>
+        <p class="section-sub reveal">For Google Chrome, Microsoft Edge or Brave, on Windows or Mac.</p>
+        <a class="pill large reveal" id="downloadBtn" href="/ApplyFlow-extension.zip" download>Download ApplyFlow</a>
+        <p class="dl-meta reveal" id="dlMeta">Free · about 120 KB</p>
+        <p class="dl-next reveal">Then follow the five-minute setup below. ↓</p>
+      </div>
+    </section>
+
+    <!-- ============ SETUP ============ -->
+    <section class="section soft-band" id="setup">
+      <div class="wrap">
+        <p class="eyebrow reveal">Setup</p>
+        <h2 class="section-title reveal">Ready in about five minutes.</h2>
+        <p class="section-sub reveal">One time only. Every step is free. Pick your computer:</p>
+
+        <div class="os-toggle reveal" role="tablist" aria-label="Your computer">
+          <button role="tab" data-os="win" aria-selected="true" class="on">Windows</button>
+          <button role="tab" data-os="mac" aria-selected="false">Mac</button>
+        </div>
+
+        <div class="guide reveal">
+          <ol class="guide-list" id="guideList">
+            <li class="on" data-step="0"><span>1</span>Download and unzip</li>
+            <li data-step="1"><span>2</span>Turn on Developer mode</li>
+            <li data-step="2"><span>3</span>Load ApplyFlow</li>
+            <li data-step="3"><span>4</span>Pin it</li>
+            <li data-step="4"><span>5</span>Get your free AI key</li>
+            <li data-step="5"><span>6</span>Add the key</li>
+            <li data-step="6"><span>7</span>Upload your resume</li>
+            <li data-step="7"><span>8</span>Tell it about you</li>
+            <li data-step="8"><span>9</span>Connect Gmail</li>
+            <li data-step="9"><span>10</span>Start applying</li>
+          </ol>
+
+          <div class="guide-panels">
+            <article class="panel on" data-panel="0">
+              <h3>Download and unzip</h3>
+              <p>Click <a href="#download">Download ApplyFlow</a>. You'll get <code>ApplyFlow-extension.zip</code>.</p>
+              <p class="os win">Open your <b>Downloads</b> folder, right-click the zip, choose <b>Extract All…</b>, then <b>Extract</b>. Move the <b>ApplyFlow</b> folder somewhere it can stay, such as <b>Documents</b>.</p>
+              <p class="os mac hidden">Open <b>Downloads</b> in Finder and double-click the zip. Move the <b>ApplyFlow</b> folder somewhere it can stay, such as <b>Documents</b>.</p>
+              <p class="tip">Keep this folder. Chrome runs ApplyFlow from it, so if you delete it, ApplyFlow stops.</p>
+              <div class="mock-folder"><span class="folder">📁</span><b>ApplyFlow</b><small>manifest.json · content.js · icons …</small></div>
+            </article>
+
+            <article class="panel" data-panel="1">
+              <h3>Turn on Developer mode</h3>
+              <p>ApplyFlow is in testing, so it isn't in the Chrome Web Store yet. You load it yourself instead, which takes thirty seconds.</p>
+              <p>Open a new tab and go to:</p>
+              <div class="copy-row"><code id="extUrl">chrome://extensions</code><button class="copy" data-copy="chrome://extensions">Copy</button></div>
+              <p class="small muted">On Edge it's <code>edge://extensions</code>, on Brave <code>brave://extensions</code>.</p>
+              <p>Switch on <b>Developer mode</b> in the top-right corner.</p>
+              <div class="mock-bar"><span>Extensions</span><label class="switch"><span>Developer mode</span><i class="knob" id="devKnob"></i></label></div>
+            </article>
+
+            <article class="panel" data-panel="2">
+              <h3>Load ApplyFlow</h3>
+              <p>Click <b>Load unpacked</b>, which appears once Developer mode is on, and select the <b>ApplyFlow</b> folder you unzipped. Select the folder itself, not a file inside it.</p>
+              <div class="mock-bar"><span class="mock-btn">Load unpacked</span><span class="mock-btn ghost">Pack extension</span></div>
+              <div class="mock-ext"><svg class="logo" width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg><div><b>ApplyFlow AI</b><small>Your AI-powered job application assistant</small></div><i class="knob on"></i></div>
+              <p class="tip">If Chrome shows <i>“Disable developer mode extensions”</i> when it starts, just close that message. It appears for any extension loaded this way.</p>
+            </article>
+
+            <article class="panel" data-panel="3">
+              <h3>Pin it</h3>
+              <p>Click the <b>puzzle-piece icon</b> 🧩 at the top right of Chrome, then the <b>pin</b> next to ApplyFlow. Its icon now sits in your toolbar. Click it any time to see your status or open the <b>Dashboard</b>.</p>
+              <div class="mock-toolbar"><span>🧩</span><span class="pinned"><svg class="logo" width="22" height="22" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15"/><path d="M13 31.5 L51 15 L41.5 49 L30.5 36.5 Z M30.5 36.5 L51 15"/></svg></span></div>
+            </article>
+
+            <article class="panel" data-panel="4">
+              <h3>Get your free AI key</h3>
+              <p>ApplyFlow writes with Groq's free AI, using a key that's yours. Getting one takes a minute:</p>
+              <ol class="sub-steps">
+                <li>Open <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> and sign in. <b>Continue with Google</b> is the quickest.</li>
+                <li>Click <b>Create API Key</b>, give it any name (say “ApplyFlow”) and click <b>Submit</b>.</li>
+                <li>Copy the key. It starts with <code>gsk_</code>. Groq shows it only once, so paste it into ApplyFlow next.</li>
+              </ol>
+              <div class="mock-key"><span>gsk_</span><i>••••••••••••••••••••••••</i><b>Copy</b></div>
+              <p class="tip ok">This is free: no card and no billing page. Groq's free plan simply has a speed limit, roughly a couple of emails per minute, which is plenty.</p>
+            </article>
+
+            <article class="panel" data-panel="5">
+              <h3>Add the key</h3>
+              <p>Click the ApplyFlow icon → <b>Open Dashboard</b> → <b>Settings</b>. Paste your key under <b>Your AI key</b> and press <b>Save</b>.</p>
+              <div class="mock-field"><label>Groq API key</label><div><span>gsk_••••••••••••a1b2</span></div><p class="good">✓ Groq key works (replied in 0.4 s)</p></div>
+              <p class="small muted">Optional: add a free Gemini key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> as a backup for when Groq is busy.</p>
+            </article>
+
+            <article class="panel" data-panel="6">
+              <h3>Upload your resume</h3>
+              <p>Dashboard → <b>Resumes</b> → upload your resume as a PDF. Have a few versions (analyst, product, marketing)? Add them all, and ApplyFlow picks the best one for each job.</p>
+              <p>Wait a few seconds for <b>Ready</b>: the AI reads each resume once.</p>
+              <div class="mock-resume"><span>📄</span><div><b>Analyst resume.pdf</b><small>SQL · Power BI · Excel · Python</small></div><em>Ready</em></div>
+            </article>
+
+            <article class="panel" data-panel="7">
+              <h3>Tell it about you</h3>
+              <p>In <b>Settings</b>, fill in your <b>name, phone and LinkedIn</b>. ApplyFlow suggests them from your resume, so check and save.</p>
+              <p>Then the step that makes emails sound like <i>you</i>: <b>About me</b>.</p>
+              <ol class="sub-steps">
+                <li>Click <b>Copy the prompt</b>.</li>
+                <li>Paste it into the AI you use most: ChatGPT, Claude or Gemini. It already knows you from your chats.</li>
+                <li>Copy its answer, paste it into the <b>About me</b> box and press <b>Save</b>. In a minute it shows <b>✓ Ready</b>.</li>
+              </ol>
+              <p class="small muted">You can also edit the <b>Email skeleton</b>, the wording every email keeps, if you like.</p>
+            </article>
+
+            <article class="panel" data-panel="8">
+              <h3>Connect Gmail</h3>
+              <p>ApplyFlow is in testing with Google, so Google only lets approved testers connect. Two quick steps:</p>
+              <ol class="sub-steps">
+                <li><b>Send your Gmail address</b> to the person who shared ApplyFlow with you, and they'll add you as a tester.</li>
+                <li>Then go to Dashboard → Settings → <b>Connect Gmail</b>. Google will say <i>“Google hasn't verified this app”</i>: that's expected for an app in testing. Click <b>Continue</b>, then tick <b>Send email on your behalf</b>.</li>
+              </ol>
+              <p class="tip ok">ApplyFlow can only <b>send</b> emails you approve. It can't read your inbox, and it never sees your password. Google asks you to reconnect every 7 days while ApplyFlow is in testing.</p>
+              <p class="small muted">Not connected yet? You can still generate emails and use <b>Copy text</b> to send them yourself.</p>
+            </article>
+
+            <article class="panel" data-panel="9">
+              <h3>Start applying</h3>
+              <ol class="sub-steps">
+                <li>Open (or refresh) your <b>LinkedIn feed</b> and scroll.</li>
+                <li>When a hiring post appears, ApplyFlow shows <b>“Hiring post detected”</b> at the top right. Click it for a job summary.</li>
+                <li>Click <b>Generate application</b>: best resume, match score and a written email in a few seconds.</li>
+                <li>Edit anything you like, then <b>Send → Confirm</b>, or use the 🕒 button to send later.</li>
+              </ol>
+              <p class="tip ok">Nothing is ever sent without your click. Everything is tracked in your Dashboard.</p>
+            </article>
+
+            <div class="panel-nav">
+              <button class="ghost-btn" id="prevStep">← Back</button>
+              <span id="stepCount">Step 1 of 10</span>
+              <button class="pill small" id="nextStep">Next →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FAQ ============ -->
+    <section class="section" id="faq">
+      <div class="wrap narrow">
+        <p class="eyebrow reveal">Questions</p>
+        <h2 class="section-title reveal">Good to know.</h2>
+        <div class="faq reveal">
+          <details><summary>Is it really free? What's the catch?</summary><p>There's no catch. ApplyFlow is free to use, the AI key from Groq is free, and Gmail is free. You're never asked for a card. The only limit is Groq's free speed limit, a couple of emails per minute, which is plenty for job hunting.</p></details>
+          <details><summary>Do I need a credit card for the API key?</summary><p>No. Groq's free key needs only a sign-in (Google works). If a page asks for a card, you're on a paid plan page by mistake. Go back to <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>.</p></details>
+          <details><summary>Will it send emails without asking me?</summary><p>Never. Every email needs your click on <b>Send</b> and then <b>Confirm</b>, or a time you picked with <b>Send later</b>. You can edit, reschedule or cancel anything before it goes.</p></details>
+          <details><summary>What can it do with my Gmail?</summary><p>Only send emails, and only the ones you approve. ApplyFlow asks Google for “send email” permission only. It can't read your inbox, and it never sees your password. You can disconnect any time in Settings or in your Google account.</p></details>
+          <details><summary>Why does Google say “this app isn't verified”?</summary><p>Google shows that for any app that's still in testing, before Google's formal review. Testers who were added by name can safely click <b>Continue</b>.</p></details>
+          <details><summary>Why do I have to use Developer mode?</summary><p>ApplyFlow isn't in the Chrome Web Store yet, and Developer mode is Chrome's standard way to install an extension from a folder. It only affects extensions you load yourself.</p></details>
+          <details><summary>Where is my data kept? Is it private?</summary><p>Your resumes, settings and applications are stored privately for your copy of ApplyFlow only, under a random ID that only your browser knows. Nobody else using ApplyFlow can see them.</p></details>
+          <details><summary>Will the emails sound robotic?</summary><p>Not if you add <b>About me</b>: ApplyFlow uses what your own AI assistant knows about you, keeps your wording, and won't invent skills or experience. Read every email before sending; you can edit anything.</p></details>
+          <details><summary>Which browsers and computers does it work on?</summary><p>Google Chrome, Microsoft Edge and Brave, on Windows and Mac. It works on the LinkedIn website (linkedin.com), not the phone app.</p></details>
+          <details><summary>Something isn't working. What should I try?</summary><p>Most hiccups are fixed by <b>refreshing the LinkedIn page</b>, especially after ApplyFlow updates. “The AI is busy” means Groq's free speed limit: wait a minute and try again. “Gmail access expired” means it's been 7 days: click <b>Connect Gmail</b> again.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FINAL CTA ============ -->
+    <section class="section final">
+      <div class="wrap center">
+        <h2 class="section-title reveal">Spend your time on interviews,<br><span class="grad">not on copy-paste.</span></h2>
+        <div class="hero-cta reveal">
+          <a href="#download" class="pill large">Download ApplyFlow</a>
+          <a href="#setup" class="link-arrow">Setup guide</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <span>ApplyFlow · free, in testing</span>
+      <span class="muted">Not affiliated with LinkedIn, Google or Groq.</span>
+    </div>
+  </footer>
+
+  <script src="/site.js" defer></script>
+</body>
+</html>

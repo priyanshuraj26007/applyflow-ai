@@ -130,6 +130,7 @@ test("About me: saved, condensed once, then used for emails", async () => {
   const edited = await saveSettings({ aboutMe: profile + " New fact." });
   assert.equal((await aboutMe.aboutMeState(edited)).status, "pending");
   assert.ok((await aboutMe.aboutMeForPrompt(edited)).includes("New fact."), "full text used until re-condensed");
+  await aboutMe.condenseAboutMe(edited.aboutMe.trim()); // let the background re-condense finish inside this test
 });
 
 test("About me: a long profile (30k chars) is saved in full and condensed in parts", async () => {
@@ -193,7 +194,7 @@ test("About me: a run that stopped halfway carries on from the finished parts", 
   assert.equal((await aboutMe.aboutMeState(settings)).status, "pending", "a dead run counts as pending");
 
   await aboutMe.ensureCondensed(settings);
-  await new Promise(r => setTimeout(r, 100));
+  await aboutMe.condenseAboutMe(long.trim());   // waits for the background run (same text = same job)
   const condensePrompts = prompts.filter(p => /FACT SHEET/.test(p.contents));
   assert.equal(condensePrompts.length, parts.length - 1, "only the unfinished parts are sent");
   const stored = await readJson("aboutme", {});
@@ -211,6 +212,28 @@ test("About me: a failed run is retried automatically a minute later", async () 
   } }));
   assert.equal((await aboutMe.aboutMeState(settings)).status, "pending");
   await aboutMe.ensureCondensed(settings);
-  await new Promise(r => setTimeout(r, 100));
+  await aboutMe.condenseAboutMe(profile.trim());   // waits for the background run
   assert.equal((await readJson("aboutme", {})).status, "ready");
+});
+
+test("About me: an older text finishing late never overwrites the newer one", async () => {
+  let release;
+  const gate = new Promise(r => { release = r; });
+  let calls = 0;
+  _setClientForTests({ models: { async generateContent({ contents }) {
+    prompts.push({ contents });
+    if (++calls === 1) await gate;                        // the OLD text's request is slow
+    return { text: "EDUCATION\n" + "- fact ".repeat(80) };
+  } } });
+  const oldText = "Old profile text. " + "Old facts. ".repeat(40);
+  const newText = "New profile text. " + "New facts. ".repeat(40);
+  await saveSettings({ aboutMe: oldText });
+  const oldJob = aboutMe.condenseAboutMe(oldText.trim());
+  await new Promise(r => setTimeout(r, 20));
+  await saveSettings({ aboutMe: newText });
+  await aboutMe.condenseAboutMe(newText.trim());          // the new text finishes first
+  release();
+  await oldJob;                                           // then the old one finishes
+  const state = await aboutMe.aboutMeState(await getSettings());
+  assert.equal(state.status, "ready", "the newer text stays condensed");
 });

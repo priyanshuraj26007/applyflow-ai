@@ -165,18 +165,21 @@ export function condenseAboutMe(source, { fresh = false } = {}) {
         outputs.push(String(result.text || "").trim());
         model = result.model;
         await updateJson("aboutme", {}, (stored) => ({   // save progress + "still alive"
-          value: { ...stored, parts: outputs, updatedAt: new Date().toISOString() }
+          value: stored.sourceHash === h ? { ...stored, parts: outputs, updatedAt: new Date().toISOString() } : stored
         }));
       }
       const compact = outputs.filter(Boolean).join("\n\n");
       if (compact.split(/\s+/).length < 60) throw new Error("The condensed profile came back too short.");
-      await updateJson("aboutme", {}, () => ({
-        value: { sourceHash: h, status: "ready", compact: compact.slice(0, 8000), model, updatedAt: new Date().toISOString() }
+      // Only if this text is still the current one: a newer save may have taken over meanwhile.
+      await updateJson("aboutme", {}, (stored) => ({
+        value: stored.sourceHash && stored.sourceHash !== h ? stored
+          : { sourceHash: h, status: "ready", compact: compact.slice(0, 8000), model, updatedAt: new Date().toISOString() }
       }));
       console.log(`ApplyFlow AI: About me condensed (${compact.split(/\s+/).length} words, ${model}).`);
     } catch (error) {
       await updateJson("aboutme", {}, (stored) => ({
-        value: { ...stored, sourceHash: h, status: "failed", error: error.message, updatedAt: new Date().toISOString() }
+        value: stored.sourceHash && stored.sourceHash !== h ? stored
+          : { ...stored, sourceHash: h, status: "failed", error: error.message, updatedAt: new Date().toISOString() }
       }));
       console.warn(`ApplyFlow AI: condensing About me failed - ${error.message}`);
     } finally {
