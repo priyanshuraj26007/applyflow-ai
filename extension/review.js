@@ -256,7 +256,7 @@ async function scheduleLater(allowDuplicate = false, presetWhen = null) {
       method: "POST",
       body: {
         to: $("#emailTo").value.trim(), subject: $("#emailSubject").value.trim(), body: $("#emailBody").value.trim(),
-        resumeId: app.resumeId, sendAt: when.toISOString(), confirm: true, allowDuplicate
+        resumeId: app.resumeId, sendAt: when.toISOString(), confirm: true, allowDuplicate, baseUpdatedAt: app.updatedAt
       }
     });
     app = data.application;
@@ -264,7 +264,9 @@ async function scheduleLater(allowDuplicate = false, presetWhen = null) {
     if (data.warning) banner(`${AF_ICONS.warning(16)}<span>${esc(data.warning)}</span>`, "warn", "schedwarn");
   } catch (error) {
     busy = false;
-    if (error.code === "DUPLICATE") {
+    if (error.code === "STALE") {
+      await reloadApplication(error.message);
+    } else if (error.code === "DUPLICATE") {
       const again = await confirmDialog({ title: "Already applied", html: esc(error.message), confirmText: "Schedule anyway" });
       if (again) return scheduleLater(true, when);
     } else {
@@ -357,21 +359,49 @@ function showDuplicates(duplicates = []) {
 let saveTimer;
 function scheduleSave() {
   dirty = true;
+  unsaved = true;
   $("#saveState").textContent = "Editing…";
   $("#toHint").classList.toggle("hidden", !!$("#emailTo").value.trim());
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      const data = await api(`/api/applications/${encodeURIComponent(appId)}`, {
-        method: "PATCH",
-        body: { email: { to: $("#emailTo").value, subject: $("#emailSubject").value, body: $("#emailBody").value } }
-      });
-      app.email = data.application.email;
-      $("#saveState").textContent = "Draft saved";
-    } catch (error) {
-      $("#saveState").textContent = "Not saved — " + error.message;
-    }
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    // One save at a time, each based on the version the previous one returned.
+    saving = saving.then(async () => {
+      try {
+        const data = await api(`/api/applications/${encodeURIComponent(appId)}`, {
+          method: "PATCH",
+          body: { email: { to: $("#emailTo").value, subject: $("#emailSubject").value, body: $("#emailBody").value }, baseUpdatedAt: app.updatedAt }
+        });
+        app.email = data.application.email;
+        app.updatedAt = data.application.updatedAt;
+        unsaved = false;
+        $("#saveState").textContent = "Draft saved";
+      } catch (error) {
+        if (error.code === "STALE") return reloadApplication(error.message);
+        $("#saveState").textContent = "Not saved — " + error.message;
+      }
+    });
   }, 800);
+}
+
+// ---------- Staying in sync with the LinkedIn window / other tabs ----------
+let saving = Promise.resolve();
+let unsaved = false;   // typed here but not saved to the server yet
+
+/** Load the latest version from the server and show it (unless you're mid-edit here). */
+async function reloadApplication(message = null) {
+  if (!appId || busy) return;
+  if (!message && (saveTimer || unsaved)) return; // don't throw away typing that isn't saved yet
+  try {
+    const data = await api(`/api/applications/${encodeURIComponent(appId)}`);
+    if (!message && data.application.updatedAt === app?.updatedAt) return;
+    app = data.application;
+    dirty = false;
+    unsaved = false;
+    showDuplicates(data.duplicates);
+    renderAll();
+    if (message) toast(message, "error");
+  } catch { /* offline is shown elsewhere */ }
 }
 
 async function onResumeChange(resumeId) {
@@ -423,13 +453,16 @@ async function send(allowDuplicate = false) {
     clearTimeout(saveTimer);
     const data = await api(`/api/applications/${encodeURIComponent(appId)}/send`, {
       method: "POST",
-      body: { to, subject, body, resumeId: app.resumeId, confirm: true, allowDuplicate },
+      body: { to, subject, body, resumeId: app.resumeId, confirm: true, allowDuplicate, baseUpdatedAt: app.updatedAt },
       timeout: 60000
     });
     app = data.application;
     toast("Application sent! 🎉");
   } catch (error) {
-    if (error.code === "DUPLICATE") {
+    if (error.code === "STALE") {
+      busy = false;
+      await reloadApplication(error.message);
+    } else if (error.code === "DUPLICATE") {
       busy = false;
       $("#sendBtn").textContent = "Send Application";
       const again = await confirmDialog({
@@ -499,8 +532,9 @@ $("#notes").addEventListener("input", () => {
   clearTimeout(notesTimer);
   notesTimer = setTimeout(() => patchApp({ notes: $("#notes").value }), 700);
 });
-// Coming back from the Google sign-in tab → refresh Gmail status.
-window.addEventListener("focus", refreshGmail);
+// Coming back to this tab (Google sign-in, the LinkedIn window, the dashboard…) → refresh.
+window.addEventListener("focus", () => { refreshGmail(); reloadApplication(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) reloadApplication(); });
 
 // ------------------------------------------
 // Start

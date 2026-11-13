@@ -682,9 +682,12 @@ $("#testGemini").addEventListener("click", async () => {
   }
 });
 
-// Back from another tab (e.g. Google sign-in or ChatGPT) → refresh status only.
+// Back from another tab (e.g. Google sign-in, ChatGPT, LinkedIn) → refresh.
+// Settings: status only (never your typing). Applications: the list, so changes made
+// in the LinkedIn window or by the scheduler show up.
 window.addEventListener("focus", () => {
   if (!$("#tab-settings").classList.contains("hidden")) refreshSettingsStatus();
+  if (!$("#tab-applications").classList.contains("hidden")) loadApplications();
 });
 
 // ------------------------------------------

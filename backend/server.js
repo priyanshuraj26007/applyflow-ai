@@ -32,7 +32,7 @@ import {
 } from "./lib/resumes.js";
 import {
   listApplications, getApplication, upsertFromPost, modifyApplication, editApplication,
-  deleteApplication, findDuplicates, STATUSES
+  deleteApplication, findDuplicates, assertFresh, STATUSES
 } from "./lib/applications.js";
 import * as gmail from "./lib/gmail.js";
 import { getSettings, saveSettings, publicSettings } from "./lib/settings.js";
@@ -368,6 +368,7 @@ app.post("/api/applications/:id/send", route(async (req, res) => {
     return res.status(400).json({ success: false, errorCode: "NOT_CONFIRMED", error: "Sending requires explicit confirmation." });
   }
   const before = await getApplication(req.params.id);
+  assertFresh(before, req.body?.baseUpdatedAt); // never send what an out-of-date page shows
   const updated = await sendApplication({ id: req.params.id, to, subject, body, resumeId, allowDuplicate });
   if (before?.schedule) await dropSchedule(req.params.id); // "Send now" on a scheduled email
   res.json({ success: true, application: updated });
@@ -379,6 +380,7 @@ app.post("/api/applications/:id/schedule", route(async (req, res) => {
   if (confirm !== true) {
     return res.status(400).json({ success: false, errorCode: "NOT_CONFIRMED", error: "Scheduling requires explicit confirmation." });
   }
+  assertFresh(await getApplication(req.params.id), req.body?.baseUpdatedAt);
   const result = await scheduleApplication({ id: req.params.id, to, subject, body, resumeId, sendAt, allowDuplicate });
   res.json({ success: true, ...result });
 }));

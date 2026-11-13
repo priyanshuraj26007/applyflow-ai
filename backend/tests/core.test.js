@@ -172,3 +172,17 @@ test("toScore understands digits, percentages and numbers written as words", () 
   assert.equal(toScore("n/a"), 0);
   assert.equal(toScore(null), 0);
 });
+
+test("stale pages can't overwrite newer changes (updatedAt check)", async () => {
+  const { modifyApplication, assertFresh } = await import("../lib/applications.js");
+  const app = await upsertFromPost({ postText: "We are hiring a stale test analyst at Acme, mail jobs@acme.com with your CV please.", job: { jobTitle: "Stale test", email: "jobs@acme.com" } });
+  const seen = (await modifyApplication(app.id, (a) => { a.email = { to: "recruiter@acme.com", subject: "s", body: "b" }; })).updatedAt;
+  await new Promise(r => setTimeout(r, 5));
+  // The dashboard changes the recipient…
+  await editApplication(app.id, { email: { to: "me@example.com" } });
+  // …then the old LinkedIn window tries to save its old copy.
+  await assert.rejects(editApplication(app.id, { email: { to: "recruiter@acme.com" }, baseUpdatedAt: seen }), { code: "STALE", status: 409 });
+  assert.throws(() => assertFresh({ updatedAt: "new" }, "old"), { code: "STALE" });
+  assert.doesNotThrow(() => assertFresh({ updatedAt: "same" }, "same"));
+  assert.doesNotThrow(() => assertFresh({ updatedAt: "x" }, undefined), "old clients without a version still work");
+});

@@ -419,6 +419,10 @@ function displayJobFromAi(aiJob, localJob) {
 // 7. "Send later" (clock button next to Send): pick a time; the server sends it then,
 //    even if this laptop is off. Until then the email stays editable, and it can be
 //    sent now, moved to another time, or cancelled. Time helpers: schedule-time.js.
+// 8. Always in sync with the dashboard / review page: the window reloads the latest
+//    version when it opens, when you switch posts, and when you come back to this tab.
+//    Every save/send/schedule says which version it was based on; if the application
+//    was changed elsewhere meanwhile, the server refuses (STALE) and we reload.
 // Everything lives in one Shadow DOM so LinkedIn's CSS can't break it.
 // Light/dark follows LinkedIn's own theme. Icons come from icons.js (AF_ICONS).
 // This page never talks to the backend directly — every call goes through background.js.
@@ -658,6 +662,7 @@ const applyFlowPopup = (() => {
     render();
     loadContext();
     if (post) analysePost(post);
+    if (post?.applicationId && post.draft.status !== "idle") refreshPost(post);
   }
 
   function closePanel() {
@@ -739,6 +744,7 @@ const applyFlowPopup = (() => {
       const app = response.application;
       post.application = app;
       post.applicationId = app.id;
+      post.baseUpdatedAt = app.updatedAt || null;
       post.resumeId = app.resumeId;
       post.duplicates = response.duplicates || [];
       post.fields = { to: app.email?.to || "", subject: app.email?.subject || "", body: app.email?.body || "" };
@@ -765,12 +771,26 @@ const applyFlowPopup = (() => {
     saveTimer = setTimeout(() => saveNow(post), 800);
   }
 
-  async function saveNow(post) {
+  function saveNow(post) {
     saveTimer = null;
-    if (!post.applicationId) return;
-    const response = await sendToBackground({ type: "SAVE_DRAFT", applicationId: post.applicationId, email: { ...post.fields } });
-    post.saveNote = response.success ? "Draft saved" : `Not saved — ${response.error}`;
-    if (post === current()) setFootNote(post.saveNote);
+    if (!post.applicationId) return Promise.resolve();
+    // One save at a time, each based on the version the previous save returned.
+    post.saving = Promise.resolve(post.saving).then(async () => {
+      const response = await sendToBackground({
+        type: "SAVE_DRAFT", applicationId: post.applicationId, email: { ...post.fields }, baseUpdatedAt: post.baseUpdatedAt
+      });
+      if (response.success) {
+        post.application = response.application || post.application;
+        post.baseUpdatedAt = response.application?.updatedAt || post.baseUpdatedAt;
+        post.saveNote = "Draft saved";
+      } else if (response.errorCode === "STALE") {
+        return handleStale(post);
+      } else {
+        post.saveNote = `Not saved — ${response.error}`;
+      }
+      if (post === current()) setFootNote(post.saveNote);
+    });
+    return post.saving;
   }
 
   function flushSave() {
@@ -815,9 +835,11 @@ const applyFlowPopup = (() => {
     saveTimer = null;
     post.send = { status: "sending" };
     render();
+    await post.saving;
 
     const response = await sendToBackground({
       type: "SEND_APPLICATION",
+      baseUpdatedAt: post.baseUpdatedAt,
       applicationId: post.applicationId,
       to: post.fields.to.trim(),
       subject: post.fields.subject.trim(),
@@ -828,9 +850,11 @@ const applyFlowPopup = (() => {
     });
 
     if (response.success) {
-      post.application = response.application;
+      applyServerApplication(post, response.application);
       post.send = { status: "sent" };
       post.alreadyApplied = true;
+    } else if (response.errorCode === "STALE") {
+      return handleStale(post);
     } else if (response.errorCode === "DUPLICATE") {
       post.send = { status: "duplicate", error: response.error };
     } else {
@@ -840,6 +864,59 @@ const applyFlowPopup = (() => {
       post.send = { status: "idle", error: response.error };
     }
     render();
+  }
+
+  // ---------- Keeping in sync with other tabs ----------
+  /** Take the server's copy of the application as the truth for this post. */
+  function applyServerApplication(post, app) {
+    if (!app) return;
+    post.application = app;
+    post.applicationId = app.id;
+    post.baseUpdatedAt = app.updatedAt || null;
+    if (app.email?.body) {
+      post.fields = { to: app.email.to || "", subject: app.email.subject || "", body: app.email.body || "" };
+      if (post.draft.status !== "loading") post.draft = { ...post.draft, status: "ready" };
+    }
+    if (app.resumeId) post.resumeId = app.resumeId;
+    if (app.sentMessageId) {
+      post.send = { status: "sent" };
+      post.alreadyApplied = true;
+    } else if (!["pick", "confirm", "sending", "scheduling", "cancelling"].includes(post.send.status)) {
+      post.send = { status: "idle", warning: post.send.warning };
+    }
+  }
+
+  /** Reload one post's application from the server. Never overrides edits not yet saved. */
+  async function refreshPost(post, { note = null, fromSave = false } = {}) {
+    if (!post?.applicationId || post.draft.status === "loading") return;
+    if (post === current() && saveTimer) return;          // the user is typing here
+    if (["sending", "scheduling", "cancelling"].includes(post.send.status)) return;
+    if (!fromSave) await post.saving;                      // let an in-flight save land first
+    const response = await sendToBackground({ type: "GET_APPLICATION", applicationId: post.applicationId });
+    if (!response.success || !response.application) return;
+    const changed = response.application.updatedAt !== post.baseUpdatedAt;
+    if (!changed && !note) return;
+    if (post === current() && saveTimer) return;           // started typing meanwhile
+    applyServerApplication(post, response.application);
+    post.duplicates = response.duplicates || post.duplicates;
+    if (note) post.saveNote = note;
+    render();
+  }
+
+  function refreshAll() {
+    if (mode === "hidden") return;
+    for (const post of posts) if (post.applicationId && post.draft.status !== "idle") refreshPost(post);
+  }
+  // Back to this LinkedIn tab (e.g. after editing in the dashboard) → reload.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(); });
+  window.addEventListener("focus", refreshAll);
+
+  /** The server said our copy is out of date: reload and explain. */
+  async function handleStale(post) {
+    post.send = { status: "idle" };
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await refreshPost(post, { note: "Changed in another tab: showing the latest version", fromSave: true });
   }
 
   // ---------- Send later ----------
@@ -869,8 +946,10 @@ const applyFlowPopup = (() => {
     const when = post.send.when;
     post.send = { status: "scheduling", when };
     render();
+    await post.saving;
     const response = await sendToBackground({
       type: "SCHEDULE_SEND",
+      baseUpdatedAt: post.baseUpdatedAt,
       applicationId: post.applicationId,
       to: post.fields.to.trim(),
       subject: post.fields.subject.trim(),
@@ -881,8 +960,10 @@ const applyFlowPopup = (() => {
       allowDuplicate
     });
     if (response.success) {
-      post.application = response.application;
+      applyServerApplication(post, response.application);
       post.send = { status: "idle", warning: response.warning || null };
+    } else if (response.errorCode === "STALE") {
+      return handleStale(post);
     } else if (response.errorCode === "DUPLICATE") {
       post.send = { status: "pick", when, duplicate: true, error: response.error };
     } else {
@@ -895,7 +976,7 @@ const applyFlowPopup = (() => {
     post.send = { status: "cancelling" };
     render();
     const response = await sendToBackground({ type: "CANCEL_SCHEDULE", applicationId: post.applicationId });
-    if (response.success) post.application = response.application;
+    if (response.success) applyServerApplication(post, response.application);
     post.send = { status: "idle", error: response.success ? null : response.error };
     render();
   }
@@ -996,6 +1077,7 @@ const applyFlowPopup = (() => {
     const post = current();
     render();
     if (mode === "panel" && post) analysePost(post);
+    if (post?.applicationId && post.draft.status !== "idle") refreshPost(post);
   }
 
   function onInput(event) {

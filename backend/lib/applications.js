@@ -92,6 +92,7 @@ export async function upsertFromPost({ postText, sourceUrl, job, analysedWith, a
       status: job ? "Analysed" : "Detected",
       detectedAt: now,
       lastSeenAt: now,
+      updatedAt: now,    // changes whenever the email / status / schedule changes (see modifyApplication)
       appliedAt: null,
       match: null,
       resumeId: null,
@@ -105,19 +106,37 @@ export async function upsertFromPost({ postText, sourceUrl, job, analysedWith, a
   });
 }
 
-/** Apply a change to one application. `mutate(app)` edits it in place. */
+/**
+ * Apply a change to one application. `mutate(app)` edits it in place.
+ * Every change gets a new `updatedAt`, which pages use to notice that the
+ * application was changed somewhere else (another tab, the dashboard, the scheduler).
+ */
 export function modifyApplication(id, mutate) {
   return updateJson("applications", EMPTY, async (db) => {
     const app = db.applications.find(a => a.id === id);
     if (!app) throw new ApplicationError("NOT_FOUND", "Application not found.", 404);
     await mutate(app);
+    app.updatedAt = new Date().toISOString();
     return { value: db, result: app };
   });
+}
+
+/**
+ * The page's copy is out of date: it was based on `baseUpdatedAt`, but the application
+ * has changed since. Throws 409 STALE so the page reloads instead of overwriting newer data.
+ */
+export function assertFresh(app, baseUpdatedAt) {
+  if (baseUpdatedAt && app?.updatedAt && app.updatedAt !== baseUpdatedAt) {
+    throw new ApplicationError("STALE",
+      "This application was changed in another tab (for example the dashboard). The latest version is now shown — please check it.", 409);
+  }
 }
 
 /** Safe user edits from the review page / dashboard. */
 export function editApplication(id, changes) {
   return modifyApplication(id, (app) => {
+    // Email edits from an out-of-date page must never overwrite newer changes.
+    if (changes.email) assertFresh(app, changes.baseUpdatedAt);
     if (changes.status !== undefined) {
       if (!STATUSES.includes(changes.status)) throw new ApplicationError("BAD_STATUS", "Unknown status.");
       // "Scheduled" is set only by scheduling a send (it needs a time), not by hand.

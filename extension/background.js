@@ -198,11 +198,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
   }
 
-  // Save the user's edits to the draft.
+  // Save the user's edits to the draft (refused with STALE if it changed elsewhere meanwhile).
   if (message.type === "SAVE_DRAFT") {
     return respond(sendResponse, async () => {
-      const result = await api(appPath(message.applicationId), { method: "PATCH", body: { email: message.email } });
+      const result = await api(appPath(message.applicationId), {
+        method: "PATCH", body: { email: message.email, baseUpdatedAt: message.baseUpdatedAt || undefined }
+      });
       return { application: result.application };
+    });
+  }
+
+  // The latest version of an application (the window re-syncs with the dashboard / other tabs).
+  if (message.type === "GET_APPLICATION") {
+    return respond(sendResponse, async () => {
+      const result = await api(appPath(message.applicationId));
+      return { application: result.application, duplicates: result.duplicates };
     });
   }
 
@@ -217,7 +227,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           body: message.body,
           resumeId: message.resumeId,
           confirm: message.confirm === true,
-          allowDuplicate: message.allowDuplicate === true
+          allowDuplicate: message.allowDuplicate === true,
+          baseUpdatedAt: message.baseUpdatedAt || undefined
         },
         timeout: 60000
       });
@@ -237,7 +248,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           resumeId: message.resumeId,
           sendAt: message.sendAt,
           confirm: message.confirm === true,
-          allowDuplicate: message.allowDuplicate === true
+          allowDuplicate: message.allowDuplicate === true,
+          baseUpdatedAt: message.baseUpdatedAt || undefined
         }
       });
       return { application: result.application, warning: result.warning };
