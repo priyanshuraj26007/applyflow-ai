@@ -389,15 +389,27 @@ app.delete("/api/applications/:id/schedule", route(async (req, res) => {
   res.json({ success: true, application: await cancelSchedule(req.params.id) });
 }));
 
-// Called every minute by Supabase (pg_cron) — but only when a scheduled email is due.
-// Protected by a shared secret; not under /api (no tester ID: it sends for every tester).
-app.post("/internal/send-due", route(async (req, res) => {
+// Calls from Supabase's pg_cron carry the shared secret (Vercel env CRON_SECRET).
+function fromCron(req) {
   const secret = process.env.CRON_SECRET || "";
   const given = String(req.headers["x-cron-secret"] || "");
-  const ok = secret.length >= 32 && given.length === secret.length &&
+  return secret.length >= 32 && given.length === secret.length &&
     crypto.timingSafeEqual(Buffer.from(given), Buffer.from(secret));
-  if (!ok) return res.status(401).json({ success: false, errorCode: "FORBIDDEN", error: "Not allowed." });
+}
+
+// Called every minute by Supabase (pg_cron) — but only when a scheduled email is due.
+// Not under /api (no tester ID: it sends for every tester).
+app.post("/internal/send-due", route(async (req, res) => {
+  if (!fromCron(req)) return res.status(401).json({ success: false, errorCode: "FORBIDDEN", error: "Not allowed." });
   res.json({ success: true, ...(await runDueJobs()) });
+}));
+
+// Called every 3 minutes by Supabase so the server never goes cold (see the keep-warm
+// migration). One tiny database read also keeps the free Supabase project active.
+app.post("/internal/warm", route(async (req, res) => {
+  if (!fromCron(req)) return res.status(401).json({ success: false, errorCode: "FORBIDDEN", error: "Not allowed." });
+  if (USING_SUPABASE) await (await supabaseClient()).from("applyflow_config").select("key", { head: true, count: "exact" });
+  res.json({ success: true, warm: true });
 }));
 
 // ------------------------------------------

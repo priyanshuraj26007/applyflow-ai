@@ -57,6 +57,33 @@ async function checkBackend() {
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkBackend(); });
 
 // ==========================================
+// INSTANT START: show the last data at once, then refresh
+// ==========================================
+// The dashboard keeps a copy of the last list it loaded (in this browser only) and shows
+// it the moment it opens; fresh data from the server replaces it a moment later.
+const CACHE_KEY = "applyflow:dashboard-cache:v1";
+function readCache() {
+  try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || null; } catch { return null; }
+}
+function writeCache(patch) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ...readCache(), ...patch, at: Date.now() })); } catch { /* optional */ }
+}
+function showCachedData() {
+  const cache = readCache();
+  if (!cache) return;
+  if (Array.isArray(cache.statuses)) {
+    statuses = cache.statuses;
+    $("#appFilter").insertAdjacentHTML("beforeend", statuses.map(s => `<option>${esc(s)}</option>`).join(""));
+  }
+  if (Array.isArray(cache.resumes)) resumes = cache.resumes;
+  if (Array.isArray(cache.applications)) {
+    applications = cache.applications;
+    renderApplications();
+  }
+  if (Array.isArray(cache.resumes) && !$("#tab-resumes").classList.contains("hidden")) renderResumes();
+}
+
+// ==========================================
 // APPLICATIONS
 // ==========================================
 async function loadApplications() {
@@ -65,6 +92,7 @@ async function loadApplications() {
     applications = appData.applications;
     statuses = appData.statuses;
     resumes = resumeData.resumes;
+    writeCache({ applications, statuses, resumes });
 
     const filter = $("#appFilter");
     if (filter.options.length <= 1) {
@@ -171,6 +199,7 @@ $("#upCategory").innerHTML = CATEGORIES.map(([v, l]) => `<option value="${esc(v)
 async function loadResumes() {
   try {
     resumes = (await api("/api/resumes")).resumes;
+    writeCache({ resumes });
     renderResumes();
     schedulePoll();
   } catch (error) {
@@ -699,4 +728,9 @@ $all("[data-icon]").forEach((el) => {
   if (make) el.outerHTML = make(Number(el.dataset.size) || 16);
 });
 checkBackend();
-showTab(location.hash.slice(1) || "applications");
+const startTab = location.hash.slice(1) || "applications";
+if (startTab === "applications" || startTab === "resumes") {
+  $all(".tab-panel").forEach(p => p.classList.toggle("hidden", p.id !== `tab-${startTab}`));
+  showCachedData();
+}
+showTab(startTab);

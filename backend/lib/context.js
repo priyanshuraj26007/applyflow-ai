@@ -39,13 +39,12 @@ export function requestMemo(key, compute) {
 
 // On Vercel a function may be frozen as soon as the response is sent. waitUntil()
 // keeps it alive until background work (resume analysis, About me condensing) ends.
-let waitUntil = null;
-if (process.env.VERCEL) {
-  try {
-    ({ waitUntil } = await import("@vercel/functions"));
-  } catch {
-    console.warn("ApplyFlow AI: @vercel/functions not installed - background work may be cut short.");
-  }
+// This is exactly what @vercel/functions' waitUntil does — read Vercel's request
+// context directly, so the server doesn't load that package on every cold start.
+function waitUntil(promise) {
+  const context = globalThis[Symbol.for("@vercel/request-context")]?.get?.();
+  if (context?.waitUntil) return context.waitUntil(promise);
+  if (process.env.VERCEL) console.warn("ApplyFlow AI: no Vercel request context - background work may be cut short.");
 }
 
 /** Run work after the response without blocking it. Never throws. */
@@ -53,6 +52,6 @@ export function background(promise) {
   const safe = Promise.resolve(promise).catch((error) => {
     console.error(`ApplyFlow AI: background task failed: ${error?.message}`);
   });
-  if (waitUntil) waitUntil(safe);
+  waitUntil(safe);
   return safe;
 }

@@ -4,7 +4,9 @@
 // Talks to Gemini only. Choosing models, racing, fallbacks and retries live in
 // ./ai-router.js. Override models in .env, e.g.
 //   GEMINI_MODELS_FAST=gemini-3.5-flash-lite,gemini-3.5-flash
-import { GoogleGenAI } from "@google/genai";
+// The Google library is loaded only when a Gemini request is actually made (most testers
+// only use Groq), which keeps the server's cold start short.
+let GoogleGenAI = null;
 
 export const parseModels = (value, fallback) =>
   (value || fallback).split(",").map(m => m.trim()).filter(Boolean);
@@ -38,9 +40,10 @@ export { GeminiError as AIError };
 
 let testClient = null;
 const clients = new Map(); // one client per API key (each tester has their own)
-function client(apiKey) {
+async function client(apiKey) {
   if (testClient) return testClient;
   if (!apiKey) throw new GeminiError("GEMINI_AUTH", "No Gemini API key. Add one in Dashboard → Settings.", 401);
+  if (!GoogleGenAI) ({ GoogleGenAI } = await import("@google/genai"));
   if (!clients.has(apiKey)) {
     if (clients.size > 200) clients.clear();
     clients.set(apiKey, new GoogleGenAI({ apiKey }));
@@ -68,7 +71,7 @@ export function classifyGeminiError(error) {
 /** One request to one Gemini model. Returns the response text. */
 export async function geminiGenerate({ model, contents, config = {}, signal, timeout, apiKey = process.env.GEMINI_API_KEY }) {
   try {
-    const response = await client(apiKey).models.generateContent({
+    const response = await (await client(apiKey)).models.generateContent({
       model,
       contents,
       config: { ...config, abortSignal: signal, httpOptions: { timeout } }
