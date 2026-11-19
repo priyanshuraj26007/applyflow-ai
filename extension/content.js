@@ -192,7 +192,12 @@ function detectHiringPosts() {
     if (postText.length < 30) return;
 
     const postId = postKeyFor(postText);
-    if (processedKeys.has(postId)) return;
+    if (processedKeys.has(postId)) {
+      // Same post, but LinkedIn re-rendered it into a new element — remember the new one
+      // so "Show post on page" keeps working.
+      applyFlowPopup.refreshElement(postId, postContainer);
+      return;
+    }
     processedKeys.add(postId);
 
     console.log("ApplyFlow AI: Hiring post detected!");
@@ -201,6 +206,32 @@ function detectHiringPosts() {
     const sourceUrl = sourceUrlFor(postContainer);
     applyFlowPopup.addPost({ postId, postText, sourceUrl, element: postContainer });
   });
+}
+
+// Find a detected post on the page again. LinkedIn often replaces a post's element
+// (re-render) or unloads it while scrolling, so the saved element can go stale.
+function locatePostElement(post) {
+  if (!post) return null;
+  if (post.element?.isConnected) return post.element;
+
+  // 1. LinkedIn's own post ID (from the post link).
+  const urn = post.sourceUrl?.match(/urn:li:(?:activity|share|ugcPost):\d+/)?.[0];
+  if (urn) {
+    const holder = document.querySelector(`[data-urn="${urn}"],[data-id="${urn}"]`);
+    if (holder) return holder;
+  }
+
+  // 2. Same text fingerprint as when it was detected.
+  const seen = new Set();
+  for (const el of document.querySelectorAll("span, p")) {
+    const raw = el.textContent || "";
+    if (raw.length < 12 || !looksLikeHiringPost(raw)) continue;
+    const container = findHiringPostContainer(el);
+    if (!container || seen.has(container)) continue;
+    seen.add(container);
+    if (postKeyFor(cleanPostText(container.innerText.trim())) === post.postId) return container;
+  }
+  return null;
 }
 
 
@@ -506,6 +537,7 @@ const applyFlowPopup = (() => {
   let toastAnimated = false;  // the notification drops in once, not on every update
   let scrollAnchor = 0;       // page scroll position when the window was opened
   let ignoreScrollUntil = 0;  // our own "View post" scrolling shouldn't close the window
+  let scrollGuardEnd = 0;     // hard limit for extending ignoreScrollUntil
 
   // Restore the position the user dragged the window to last time.
   try {
@@ -676,7 +708,13 @@ const applyFlowPopup = (() => {
   // (The post, the job summary and any email edits stay exactly as they were.)
   window.addEventListener("scroll", () => {
     if (mode !== "panel") return;
-    if (Date.now() < ignoreScrollUntil) { scrollAnchor = window.scrollY; return; }
+    if (Date.now() < ignoreScrollUntil) {
+      // Our own smooth scroll can run longer than the first 1.5s on a long feed:
+      // keep ignoring while it's still moving (up to 5s total).
+      ignoreScrollUntil = Math.min(scrollGuardEnd, Math.max(ignoreScrollUntil, Date.now() + 300));
+      scrollAnchor = window.scrollY;
+      return;
+    }
     if (Math.abs(window.scrollY - scrollAnchor) > 80) closePanel();
   }, { passive: true });
 
@@ -1005,16 +1043,27 @@ const applyFlowPopup = (() => {
       case "next":
         if (index < posts.length - 1) { flushSave(); index++; userBrowsing = true; afterNavigate(); }
         break;
-      case "view":
-        if (post?.element?.isConnected) {
+      case "view": {
+        const el = locatePostElement(post);
+        if (el) {
+          post.element = el;
           ignoreScrollUntil = Date.now() + 1500;
-          post.element.scrollIntoView({ behavior: "smooth", block: "center" });
-          post.element.style.outline = pageIsDark() ? "2px solid #F5F5F7" : "2px solid #0A0A0A";
-          post.element.style.outlineOffset = "6px";
-          post.element.style.borderRadius = "10px";
-          setTimeout(() => { post.element.style.outline = ""; }, 2500);
+          scrollGuardEnd = Date.now() + 5000;
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.style.outline = pageIsDark() ? "2px solid #F5F5F7" : "2px solid #0A0A0A";
+          el.style.outlineOffset = "6px";
+          el.style.borderRadius = "10px";
+          setTimeout(() => { el.style.outline = ""; el.style.outlineOffset = ""; el.style.borderRadius = ""; }, 2500);
+        } else if (post?.sourceUrl && post.sourceUrl !== location.href.split("?")[0]) {
+          // LinkedIn has unloaded the post from this page — open it on its own instead.
+          window.open(post.sourceUrl, "_blank", "noopener");
+        } else {
+          const label = target.textContent;
+          target.textContent = "Post is no longer on this page — scroll back to it";
+          setTimeout(() => { if (target.isConnected) target.textContent = label; }, 3000);
         }
         break;
+      }
       case "full":
         sendToBackground({
           type: "OPEN_REVIEW",
@@ -1481,7 +1530,13 @@ const applyFlowPopup = (() => {
     if (!posts.some(p => p.state === "analysing") && post.draft.status !== "loading") stopTicker();
   }
 
-  return { addPost, update, removePost };
+  // LinkedIn re-rendered a known post: keep the newest element for "Show post on page".
+  function refreshElement(postId, element) {
+    const post = posts.find(p => p.postId === postId);
+    if (post && !post.element?.isConnected) post.element = element;
+  }
+
+  return { addPost, update, removePost, refreshElement };
 })();
 
 
